@@ -1,7 +1,7 @@
 Build image:
 
   Rebuild docker image to pick these up:    
-  cd /Users/vivekpal/Documents/learning/rds-dashboard                                                                                                      
+  cd /<project-dir>/rds-dashboard                                                                                                      
   docker build -t rds-dashboard:latest .                                                                                                                                    
   docker run --rm --env-file .env rds-dashboard:latest python manage.py migrate                                                                                             
   docker stop rds-dashboard && docker rm rds-dashboard                                                                                                                      
