@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: "local-dev-secret"
+    depends_on:
+      - target-db
+
+  # Throwaway Postgres standing in for a "monitored RDS instance" during local
+  # verification of the lock-detection / kill flow. Not used for the app's own DB.
+  target-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppass
+      POSTGRES_DB: appdb
+    ports:
+      - "5433:5432"

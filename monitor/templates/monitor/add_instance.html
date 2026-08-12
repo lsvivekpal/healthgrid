@@ -1,0 +1,52 @@
+{% extends "monitor/base.html" %}
+{% block title %}Add instance &middot; RDS Dashboard{% endblock %}
+{% block content %}
+<p><a href="{% url 'instance-list' %}">&larr; All instances</a></p>
+<div class="card" style="max-width:480px;">
+  <h2>Add RDS instance</h2>
+  {% if prefill %}<p style="font-size:13px;color:#666;">Connection details copied from the source instance &mdash; just set a name, identifier and database.</p>{% endif %}
+  <form method="post" id="add-instance-form">
+    {% csrf_token %}
+    <label for="id_name">Display name</label>
+    <input type="text" name="name" id="id_name" required>
+
+    <label for="id_db_identifier">DB instance identifier</label>
+    <input type="text" name="db_identifier" id="id_db_identifier" required placeholder="my-app-prod">
+
+    <label for="id_region">AWS region</label>
+    <input type="text" name="region" id="id_region" value="{{ prefill.region|default:"us-east-1" }}" required>
+
+    <label for="id_host">Endpoint host</label>
+    <input type="text" name="host" id="id_host" value="{{ prefill.host|default:"" }}" required placeholder="my-app-prod.xxxx.us-east-1.rds.amazonaws.com">
+
+    <label for="id_port">Port</label>
+    <input type="number" name="port" id="id_port" value="{{ prefill.port|default:5432 }}" required>
+
+    <label for="id_db_name">Database name</label>
+    <input type="text" name="db_name" id="id_db_name" required>
+
+    <label for="id_username">DB username</label>
+    <input type="text" name="username" id="id_username" value="{{ prefill.username|default:"" }}" required placeholder="appuser">
+
+    <label for="id_password">DB password</label>
+    <input type="password" name="password" id="id_password" value="{{ prefill.password|default:"" }}" required>
+
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+      <input type="checkbox" name="ssl_required" id="id_ssl_required" {% if prefill.ssl_required|default:True %}checked{% endif %} style="width:auto;">
+      Require SSL (uncheck for local/dev Postgres)
+    </label>
+
+    <div style="display:flex;align-items:center;gap:12px;margin-top:16px;">
+      <button class="btn btn-primary" type="submit">Add instance</button>
+      <button class="btn btn-muted" type="button"
+              hx-post="{% url 'instance-test-connection' %}"
+              hx-include="#add-instance-form"
+              hx-target="#test-result"
+              hx-swap="innerHTML"
+              hx-indicator="#test-spinner">Test connection</button>
+      <span id="test-spinner" class="htmx-indicator"><span class="spinner"></span></span>
+      <span id="test-result"></span>
+    </div>
+  </form>
+</div>
+{% endblock %}

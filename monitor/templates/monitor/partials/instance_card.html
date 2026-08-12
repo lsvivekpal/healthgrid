@@ -1,0 +1,25 @@
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <a href="{% url 'instance-detail' instance.pk %}" style="font-weight:600;font-size:16px;text-decoration:none;color:#1c1f26;">
+        {{ instance.name }}
+      </a>
+      <div style="font-size:13px;color:#666;">
+        {{ instance.db_identifier }} &middot; {{ instance.region }}
+        {% if user.is_staff %} &middot; <a href="{% url 'instance-add' %}?duplicate={{ instance.pk }}">duplicate</a>{% endif %}
+      </div>
+    </div>
+    <div>
+      {% if reachable %}
+        {% if blocked_count > 0 %}
+          <span class="badge badge-danger">{{ blocked_count }} blocked</span>
+        {% else %}
+          <span class="badge badge-ok">healthy</span>
+        {% endif %}
+        <span class="badge badge-muted">{{ session_count }} sessions</span>
+      {% else %}
+        <span class="badge badge-warn" title="{{ error }}">unreachable</span>
+      {% endif %}
+    </div>
+  </div>
+</div>

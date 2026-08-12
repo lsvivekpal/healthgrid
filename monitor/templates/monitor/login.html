@@ -1,0 +1,16 @@
+{% extends "monitor/base.html" %}
+{% block title %}Login &middot; RDS Dashboard{% endblock %}
+{% block content %}
+<div class="card" style="max-width:360px;margin:60px auto;">
+  <h2>Sign in</h2>
+  <form method="post">
+    {% csrf_token %}
+    <label for="id_username">Username</label>
+    <input type="text" name="username" id="id_username" required autofocus>
+    <label for="id_password">Password</label>
+    <input type="password" name="password" id="id_password" required>
+    {% if form.errors %}<p style="color:#a30000;font-size:13px;">Invalid username or password.</p>{% endif %}
+    <button class="btn btn-primary" type="submit" style="margin-top:16px;">Sign in</button>
+  </form>
+</div>
+{% endblock %}

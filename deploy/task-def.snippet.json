@@ -1,0 +1,38 @@
+{
+  "family": "rds-dashboard",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/rds-dashboard-task-role",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/rds-dashboard-execution-role",
+  "containerDefinitions": [
+    {
+      "name": "web",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/rds-dashboard:latest",
+      "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "AWS_REGION", "value": "REGION" },
+        { "name": "DJANGO_ALLOWED_HOSTS", "value": "dashboard.internal.example.com" }
+      ],
+      "secrets": [
+        { "name": "DJANGO_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/django-secret-key" },
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/database-url" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/healthz || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/rds-dashboard",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "web"
+        }
+      }
+    }
+  ]
+}

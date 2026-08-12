@@ -1,0 +1,109 @@
+{% if error %}
+  <div class="card"><span class="badge badge-warn">unreachable</span> <code>{{ error }}</code></div>
+{% else %}
+
+  <div class="card" id="locks" style="border-color:{% if blocking %}#f3b8b8{% else %}#ddd{% endif %};">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <strong style="{% if blocking %}color:#a30000;{% endif %}">Locks</strong>
+      <div style="display:flex;align-items:center;gap:8px;">
+        {% if blocking %}
+        <a class="btn btn-muted" href="{% url 'instance-locks-download' instance.pk %}" style="font-size:12px;padding:4px 10px;">Download CSV</a>
+        {% endif %}
+        <span class="badge {% if blocking %}badge-warn{% else %}badge-ok{% endif %}">{{ blocking|length }}</span>
+      </div>
+    </div>
+    {% if blocking %}
+      <table style="margin-top:8px;">
+        <thead>
+          <tr><th>Blocked pid</th><th>Waiting (s)</th><th>Blocked query</th><th>Blocking pid</th><th>Blocking query</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for row in blocking %}
+          <tr class="row-blocking">
+            <td>{{ row.blocked_pid }} ({{ row.blocked_user }})</td>
+            <td>{% if row.waiting_seconds >= 30 %}<strong style="color:#a30000;">{{ row.waiting_seconds }}</strong>{% else %}{{ row.waiting_seconds }}{% endif %}</td>
+            <td><code>{{ row.blocked_query|truncatechars:60 }}</code></td>
+            <td>{{ row.blocking_pid }} ({{ row.blocking_user }})</td>
+            <td><code>{{ row.blocking_query|truncatechars:60 }}</code></td>
+            <td>
+              {% if is_staff %}
+              <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+                <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
+                      onsubmit="return confirm('Terminate backend pid {{ row.blocking_pid }} (the blocking query) on {{ instance.name }}? This cannot be undone.');">
+                  {% csrf_token %}
+                  <input type="hidden" name="pid" value="{{ row.blocking_pid }}">
+                  <input type="hidden" name="query" value="{{ row.blocking_query|truncatechars:500 }}">
+                  <button class="btn btn-danger" type="submit">Kill blocking ({{ row.blocking_pid }})</button>
+                </form>
+                <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
+                      onsubmit="return confirm('Terminate backend pid {{ row.blocked_pid }} (the blocked query) on {{ instance.name }}? This cannot be undone.');">
+                  {% csrf_token %}
+                  <input type="hidden" name="pid" value="{{ row.blocked_pid }}">
+                  <input type="hidden" name="query" value="{{ row.blocked_query|truncatechars:500 }}">
+                  <button class="btn btn-muted" type="submit">Kill blocked ({{ row.blocked_pid }})</button>
+                </form>
+                <form class="inline" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
+                      onsubmit="return confirm('Terminate BOTH pid {{ row.blocking_pid }} and pid {{ row.blocked_pid }} on {{ instance.name }}? This cannot be undone.');">
+                  {% csrf_token %}
+                  <input type="hidden" name="pid" value="{{ row.blocking_pid }}">
+                  <input type="hidden" name="pid" value="{{ row.blocked_pid }}">
+                  <input type="hidden" name="query" value="chain: {{ row.blocking_query|truncatechars:250 }} | {{ row.blocked_query|truncatechars:250 }}">
+                  <button class="btn btn-danger" type="submit">Kill entire chain</button>
+                </form>
+              </div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p style="color:#666;margin:8px 0 0;">No blocking locks right now.</p>
+    {% endif %}
+  </div>
+
+  <div class="card" id="sessions" style="margin-top:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <strong>Sessions</strong>
+      <span class="badge badge-muted">{{ activity|length }}</span>
+    </div>
+    <table style="margin-top:8px;">
+      <thead>
+        <tr><th>PID</th><th>User</th><th>State</th><th>Wait event</th><th>Duration (s)</th><th>Query</th>{% if is_staff %}<th></th>{% endif %}</tr>
+      </thead>
+      <tbody>
+        {% for row in activity %}
+        <tr class="{% if row.pid in blocking_pids %}row-blocking{% endif %}">
+          <td>{{ row.pid }}</td>
+          <td>{{ row.usename }}</td>
+          <td>
+            {{ row.state }}
+            {% if "idle in transaction" in row.state %}<span class="badge badge-warn" style="margin-left:4px;">idle-in-txn</span>{% endif %}
+          </td>
+          <td>{{ row.wait_event|default:"—" }}</td>
+          <td>{% if row.duration_seconds >= 30 %}<strong style="color:#a30000;">{{ row.duration_seconds }}</strong>{% else %}{{ row.duration_seconds|default:"—" }}{% endif %}</td>
+          <td><code>{{ row.query|truncatechars:80 }}</code></td>
+          {% if is_staff %}
+          <td>
+            {% if row.pid not in blocking_pids %}
+            <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
+                  onsubmit="return confirm('Terminate backend pid {{ row.pid }} on {{ instance.name }}? This cannot be undone.');">
+              {% csrf_token %}
+              <input type="hidden" name="pid" value="{{ row.pid }}">
+              <input type="hidden" name="query" value="{{ row.query|truncatechars:500 }}">
+              <button class="btn btn-muted" type="submit">Kill</button>
+            </form>
+            {% else %}
+            <a href="#locks" style="font-size:12px;">see locks &uarr;</a>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% empty %}
+        <tr><td colspan="{% if is_staff %}7{% else %}6{% endif %}">No active sessions.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+{% endif %}

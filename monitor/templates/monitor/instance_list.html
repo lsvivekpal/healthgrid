@@ -1,0 +1,27 @@
+{% extends "monitor/base.html" %}
+{% block title %}Instances &middot; RDS Dashboard{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+  <h2 style="margin:0;">RDS Instances</h2>
+  <div>
+    <span id="list-refresh-spinner" class="htmx-indicator" style="font-size:12px;color:#2563eb;margin-right:12px;"><span class="spinner"></span>refreshing…</span>
+    {% if user.is_staff %}
+      <a class="btn btn-primary" href="{% url 'instance-add' %}">+ Add instance</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if not instances %}
+  <p>No instances registered yet.</p>
+{% endif %}
+
+{% for instance in instances %}
+  <div id="card-{{ instance.pk }}"
+       hx-get="{% url 'instance-card' instance.pk %}"
+       hx-trigger="load, every 15s"
+       hx-swap="innerHTML"
+       hx-indicator="#list-refresh-spinner">
+    <div class="card">Loading {{ instance.name }}…</div>
+  </div>
+{% endfor %}
+{% endblock %}
