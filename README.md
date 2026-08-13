@@ -1,4 +1,16 @@
-Build image:
+  source .venv/bin/activate                                                                                                                                            
+  export DJANGO_DEBUG=true                                                                                                                                             
+  python manage.py createsuperuser                                                                                                                                     
+  python manage.py runserver                                                                                                                                           
+                                                                                                                                                                       
+  Add instance form now asks host/port/db_name/username/password + "Require SSL" checkbox — uncheck it for a plain local Postgres (e.g. target-db in docker-compose,   
+  port 5433, user appuser/apppass). Want me to start runserver now in background?                                                                                      
+                              
+
+Then open http://127.0.0.1:8000/. Login,
+
+prod use case:
+Build Docker image:
 
   Rebuild docker image to pick these up:    
   cd /<project-dir>/rds-dashboard                                                                                                      
