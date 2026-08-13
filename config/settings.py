@@ -109,8 +109,21 @@ ACTIVITY_CACHE_TTL = int(os.environ.get("ACTIVITY_CACHE_TTL", "10"))
 # changing it makes existing stored passwords undecryptable.
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "REDACTED_DEV_KEY")
 
+# Domains allowed to POST here (Django 4+ require this even for same-origin
+# requests through a reverse proxy). Comma-separated, must include scheme.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+
+# Set true only when nginx actually terminates TLS (serves https://). If nginx
+# is plain HTTP, leave false — Secure cookies get silently dropped by the
+# browser over HTTP, which looks exactly like a CSRF failure.
+USE_HTTPS = os.environ.get("DJANGO_USE_HTTPS", "false").lower() == "true"
+if USE_HTTPS:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 if not DEBUG:
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = USE_HTTPS
+    CSRF_COOKIE_SECURE = USE_HTTPS
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True

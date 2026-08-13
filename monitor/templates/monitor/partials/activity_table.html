@@ -13,13 +13,31 @@
       </div>
     </div>
     {% if blocking %}
+      {% if is_staff %}
+      <form id="locks-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
+            onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirm('Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
+        {% csrf_token %}
+        <div class="bulk-bar">
+          <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;">
+            <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('#locks-bulk-form input[name=pid]').forEach(function(cb){cb.checked=this.checked;}, this)"> select all
+          </label>
+          <button class="btn btn-danger" type="submit" style="font-size:12px;padding:4px 10px;">Kill selected</button>
+        </div>
+      <div class="table-scroll">
+      {% endif %}
       <table style="margin-top:8px;">
         <thead>
-          <tr><th>Blocked pid</th><th>Waiting (s)</th><th>Blocked query</th><th>Blocking pid</th><th>Blocking query</th><th></th></tr>
+          <tr>{% if is_staff %}<th></th>{% endif %}<th>Blocked pid</th><th>Waiting (s)</th><th>Blocked query</th><th>Blocking pid</th><th>Blocking query</th><th></th></tr>
         </thead>
         <tbody>
           {% for row in blocking %}
           <tr class="row-blocking">
+            {% if is_staff %}
+            <td>
+              <input type="checkbox" name="pid" value="{{ row.blocking_pid }}" form="locks-bulk-form" title="select blocking pid {{ row.blocking_pid }}" style="width:auto;">
+              <input type="checkbox" name="pid" value="{{ row.blocked_pid }}" form="locks-bulk-form" title="select blocked pid {{ row.blocked_pid }}" style="width:auto;">
+            </td>
+            {% endif %}
             <td>{{ row.blocked_pid }} ({{ row.blocked_user }})</td>
             <td>{% if row.waiting_seconds >= 30 %}<strong style="color:#a30000;">{{ row.waiting_seconds }}</strong>{% else %}{{ row.waiting_seconds }}{% endif %}</td>
             <td><code>{{ row.blocked_query|truncatechars:60 }}</code></td>
@@ -57,6 +75,7 @@
           {% endfor %}
         </tbody>
       </table>
+      {% if is_staff %}</div></form>{% endif %}
     {% else %}
       <p style="color:#666;margin:8px 0 0;">No blocking locks right now.</p>
     {% endif %}
@@ -67,13 +86,32 @@
       <strong>Sessions</strong>
       <span class="badge badge-muted">{{ activity|length }}</span>
     </div>
+    {% if is_staff and activity %}
+    <form id="sessions-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
+          onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirm('Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
+      {% csrf_token %}
+      <div class="bulk-bar">
+        <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;">
+          <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('#sessions-bulk-form input[name=pid]').forEach(function(cb){cb.checked=this.checked;}, this)"> select all
+        </label>
+        <button class="btn btn-danger" type="submit" style="font-size:12px;padding:4px 10px;">Kill selected</button>
+      </div>
+    <div class="table-scroll">
+    {% endif %}
     <table style="margin-top:8px;">
       <thead>
-        <tr><th>PID</th><th>User</th><th>State</th><th>Wait event</th><th>Duration (s)</th><th>Query</th>{% if is_staff %}<th></th>{% endif %}</tr>
+        <tr>{% if is_staff %}<th></th>{% endif %}<th>PID</th><th>User</th><th>State</th><th>Wait event</th><th>Duration (s)</th><th>Query</th>{% if is_staff %}<th></th>{% endif %}</tr>
       </thead>
       <tbody>
         {% for row in activity %}
         <tr class="{% if row.pid in blocking_pids %}row-blocking{% endif %}">
+          {% if is_staff %}
+          <td>
+            {% if row.pid not in blocking_pids %}
+            <input type="checkbox" name="pid" value="{{ row.pid }}" form="sessions-bulk-form" style="width:auto;">
+            {% endif %}
+          </td>
+          {% endif %}
           <td>{{ row.pid }}</td>
           <td>{{ row.usename }}</td>
           <td>
@@ -104,6 +142,7 @@
         {% endfor %}
       </tbody>
     </table>
+    {% if is_staff and activity %}</div></form>{% endif %}
   </div>
 
 {% endif %}

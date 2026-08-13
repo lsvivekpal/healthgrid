@@ -41,6 +41,19 @@
     .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
     .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #c7cdd6; border-top-color: #2563eb; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-scroll table { min-width: 640px; }
+    .bulk-bar { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+    @media (max-width: 720px) {
+      header { padding: 10px 14px; flex-wrap: wrap; gap: 6px; }
+      main { padding: 12px; }
+      .card { padding: 12px; }
+      th, td { padding: 6px 8px; font-size: 13px; }
+      h2 { font-size: 19px; }
+      h3 { font-size: 16px; }
+      .btn { padding: 7px 10px; font-size: 13px; }
+      form.inline { display: block; margin-bottom: 6px; }
+    }
   </style>
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
