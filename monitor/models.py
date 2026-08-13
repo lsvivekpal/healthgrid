@@ -41,6 +41,7 @@ class AuditLog(models.Model):
     ACTION_CHOICES = [
         ("kill_session", "Kill session"),
         ("kill_chain", "Kill blocking chain"),
+        ("bulk_kill", "Bulk kill selected"),
         ("add_instance", "Add instance"),
         ("remove_instance", "Remove instance"),
         ("rename_instance", "Rename instance"),

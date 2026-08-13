@@ -1,14 +1,26 @@
 {% extends "monitor/base.html" %}
 {% block title %}Add instance &middot; RDS Dashboard{% endblock %}
 {% block content %}
-<p><a href="{% url 'instance-list' %}">&larr; All instances</a></p>
-<div class="card" style="max-width:480px;">
-  <h2>Add RDS instance</h2>
-  {% if prefill %}<p style="font-size:13px;color:#666;">Connection details copied from the source instance &mdash; just set a name, identifier and database.</p>{% endif %}
-  <form method="post" id="add-instance-form">
+<div class="breadcrumb">
+  <a href="{% url 'instance-list' %}">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    All instances
+  </a>
+</div>
+<div class="card" style="max-width:520px;">
+  <div class="card-title" style="font-size:17px;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Add RDS instance
+  </div>
+  {% if prefill %}
+  <p style="font-size:12.5px;color:var(--text-muted);margin-top:6px;">Connection details copied from the source instance &mdash; just set a name, identifier and database.</p>
+  {% endif %}
+  <form method="post" id="add-instance-form" style="margin-top:6px;">
     {% csrf_token %}
+
+    <div class="section-hint" style="text-transform:uppercase;letter-spacing:.05em;font-size:11px;font-weight:700;margin-top:16px;color:var(--brand);">Display</div>
     <label for="id_name">Display name</label>
-    <input type="text" name="name" id="id_name" required>
+    <input type="text" name="name" id="id_name" required placeholder="Production &middot; Orders DB">
 
     <label for="id_db_identifier">DB instance identifier</label>
     <input type="text" name="db_identifier" id="id_db_identifier" required placeholder="my-app-prod">
@@ -16,14 +28,20 @@
     <label for="id_region">AWS region</label>
     <input type="text" name="region" id="id_region" value="{{ prefill.region|default:"us-east-1" }}" required>
 
+    <div class="section-hint" style="text-transform:uppercase;letter-spacing:.05em;font-size:11px;font-weight:700;margin-top:20px;color:var(--brand);">Connection</div>
     <label for="id_host">Endpoint host</label>
     <input type="text" name="host" id="id_host" value="{{ prefill.host|default:"" }}" required placeholder="my-app-prod.xxxx.us-east-1.rds.amazonaws.com">
 
-    <label for="id_port">Port</label>
-    <input type="number" name="port" id="id_port" value="{{ prefill.port|default:5432 }}" required>
-
-    <label for="id_db_name">Database name</label>
-    <input type="text" name="db_name" id="id_db_name" required>
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;">
+      <div>
+        <label for="id_port">Port</label>
+        <input type="number" name="port" id="id_port" value="{{ prefill.port|default:5432 }}" required>
+      </div>
+      <div>
+        <label for="id_db_name">Database name</label>
+        <input type="text" name="db_name" id="id_db_name" required>
+      </div>
+    </div>
 
     <label for="id_username">DB username</label>
     <input type="text" name="username" id="id_username" value="{{ prefill.username|default:"" }}" required placeholder="appuser">
@@ -31,19 +49,25 @@
     <label for="id_password">DB password</label>
     <input type="password" name="password" id="id_password" value="{{ prefill.password|default:"" }}" required>
 
-    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-weight:400;color:var(--text);">
       <input type="checkbox" name="ssl_required" id="id_ssl_required" {% if prefill.ssl_required|default:True %}checked{% endif %} style="width:auto;">
-      Require SSL (uncheck for local/dev Postgres)
+      Require SSL <span class="section-hint">(uncheck for local/dev Postgres)</span>
     </label>
 
-    <div style="display:flex;align-items:center;gap:12px;margin-top:16px;">
-      <button class="btn btn-primary" type="submit">Add instance</button>
-      <button class="btn btn-muted" type="button"
+    <div style="display:flex;align-items:center;gap:12px;margin-top:20px;flex-wrap:wrap;">
+      <button class="btn btn-primary" type="submit">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        Add instance
+      </button>
+      <button class="btn btn-ghost" type="button"
               hx-post="{% url 'instance-test-connection' %}"
               hx-include="#add-instance-form"
               hx-target="#test-result"
               hx-swap="innerHTML"
-              hx-indicator="#test-spinner">Test connection</button>
+              hx-indicator="#test-spinner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        Test connection
+      </button>
       <span id="test-spinner" class="htmx-indicator"><span class="spinner"></span></span>
       <span id="test-result"></span>
     </div>

@@ -1,5 +1,11 @@
 {% if ok %}
-  <span class="badge badge-ok">connected ok</span>
+  <span class="badge badge-ok">
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    connected ok
+  </span>
 {% else %}
-  <span class="badge badge-danger" title="{{ error }}">failed: {{ error|truncatechars:120 }}</span>
+  <span class="badge badge-danger" title="{{ error }}">
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    failed: {{ error|truncatechars:120 }}
+  </span>
 {% endif %}

@@ -1,30 +1,45 @@
 {% if error %}
-  <div class="card"><span class="badge badge-warn">unreachable</span> <code>{{ error }}</code></div>
+  <div class="card">
+    <div class="card-title" style="color:var(--warn-fg);">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Unreachable
+    </div>
+    <code style="display:block;margin-top:8px;white-space:pre-wrap;">{{ error }}</code>
+  </div>
 {% else %}
 
-  <div class="card" id="locks" style="border-color:{% if blocking %}#f3b8b8{% else %}#ddd{% endif %};">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <strong style="{% if blocking %}color:#a30000;{% endif %}">Locks</strong>
+  <div class="card" id="locks" style="{% if blocking %}border-color:var(--danger-fg);{% endif %}">
+    <div class="card-header">
+      <div class="card-title" style="{% if blocking %}color:var(--danger-fg);{% endif %}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Locks
+      </div>
       <div style="display:flex;align-items:center;gap:8px;">
         {% if blocking %}
-        <a class="btn btn-muted" href="{% url 'instance-locks-download' instance.pk %}" style="font-size:12px;padding:4px 10px;">Download CSV</a>
+        <a class="btn btn-ghost btn-sm" href="{% url 'instance-locks-download' instance.pk %}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          CSV
+        </a>
         {% endif %}
-        <span class="badge {% if blocking %}badge-warn{% else %}badge-ok{% endif %}">{{ blocking|length }}</span>
+        <span class="badge {% if blocking %}badge-danger{% else %}badge-ok{% endif %}">{{ blocking|length }}</span>
       </div>
     </div>
     {% if blocking %}
       {% if is_staff %}
       <form id="locks-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
-            onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirm('Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
+            onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
         {% csrf_token %}
+        <input type="hidden" name="mode" value="bulk">
         <div class="bulk-bar">
-          <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;">
+          <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;color:var(--text-muted);">
             <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('#locks-bulk-form input[name=pid]').forEach(function(cb){cb.checked=this.checked;}, this)"> select all
           </label>
-          <button class="btn btn-danger" type="submit" style="font-size:12px;padding:4px 10px;">Kill selected</button>
+          <button class="btn btn-danger btn-sm" type="submit">Kill selected</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="selectLockRole('blocking')">Kill all blocking</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="selectLockRole('blocked')">Kill all blocked</button>
         </div>
-      <div class="table-scroll">
       {% endif %}
+      <div class="table-scroll">
       <table style="margin-top:8px;">
         <thead>
           <tr>{% if is_staff %}<th></th>{% endif %}<th>Blocked pid</th><th>Waiting (s)</th><th>Blocked query</th><th>Blocking pid</th><th>Blocking query</th><th></th></tr>
@@ -34,39 +49,40 @@
           <tr class="row-blocking">
             {% if is_staff %}
             <td>
-              <input type="checkbox" name="pid" value="{{ row.blocking_pid }}" form="locks-bulk-form" title="select blocking pid {{ row.blocking_pid }}" style="width:auto;">
-              <input type="checkbox" name="pid" value="{{ row.blocked_pid }}" form="locks-bulk-form" title="select blocked pid {{ row.blocked_pid }}" style="width:auto;">
+              <input type="checkbox" name="pid" value="{{ row.blocking_pid }}" data-role="blocking" form="locks-bulk-form" title="select blocking pid {{ row.blocking_pid }}" style="width:auto;">
+              <input type="checkbox" name="pid" value="{{ row.blocked_pid }}" data-role="blocked" form="locks-bulk-form" title="select blocked pid {{ row.blocked_pid }}" style="width:auto;">
             </td>
             {% endif %}
-            <td>{{ row.blocked_pid }} ({{ row.blocked_user }})</td>
-            <td>{% if row.waiting_seconds >= 30 %}<strong style="color:#a30000;">{{ row.waiting_seconds }}</strong>{% else %}{{ row.waiting_seconds }}{% endif %}</td>
+            <td>{{ row.blocked_pid }} <span style="color:var(--text-faint);">({{ row.blocked_user }})</span></td>
+            <td>{% if row.waiting_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.waiting_seconds }}</strong>{% else %}{{ row.waiting_seconds }}{% endif %}</td>
             <td><code>{{ row.blocked_query|truncatechars:60 }}</code></td>
-            <td>{{ row.blocking_pid }} ({{ row.blocking_user }})</td>
+            <td>{{ row.blocking_pid }} <span style="color:var(--text-faint);">({{ row.blocking_user }})</span></td>
             <td><code>{{ row.blocking_query|truncatechars:60 }}</code></td>
             <td>
               {% if is_staff %}
               <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
                 <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
-                      onsubmit="return confirm('Terminate backend pid {{ row.blocking_pid }} (the blocking query) on {{ instance.name }}? This cannot be undone.');">
+                      onsubmit="return confirmKill(event, 'Terminate backend pid {{ row.blocking_pid }} (the blocking query) on {{ instance.name }}? This cannot be undone.');">
                   {% csrf_token %}
                   <input type="hidden" name="pid" value="{{ row.blocking_pid }}">
                   <input type="hidden" name="query" value="{{ row.blocking_query|truncatechars:500 }}">
-                  <button class="btn btn-danger" type="submit">Kill blocking ({{ row.blocking_pid }})</button>
+                  <button class="btn btn-danger btn-sm" type="submit">Kill blocking ({{ row.blocking_pid }})</button>
                 </form>
                 <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
-                      onsubmit="return confirm('Terminate backend pid {{ row.blocked_pid }} (the blocked query) on {{ instance.name }}? This cannot be undone.');">
+                      onsubmit="return confirmKill(event, 'Terminate backend pid {{ row.blocked_pid }} (the blocked query) on {{ instance.name }}? This cannot be undone.');">
                   {% csrf_token %}
                   <input type="hidden" name="pid" value="{{ row.blocked_pid }}">
                   <input type="hidden" name="query" value="{{ row.blocked_query|truncatechars:500 }}">
-                  <button class="btn btn-muted" type="submit">Kill blocked ({{ row.blocked_pid }})</button>
+                  <button class="btn btn-muted btn-sm" type="submit">Kill blocked ({{ row.blocked_pid }})</button>
                 </form>
                 <form class="inline" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
-                      onsubmit="return confirm('Terminate BOTH pid {{ row.blocking_pid }} and pid {{ row.blocked_pid }} on {{ instance.name }}? This cannot be undone.');">
+                      onsubmit="return confirmKill(event, 'Terminate BOTH pid {{ row.blocking_pid }} and pid {{ row.blocked_pid }} on {{ instance.name }}? This cannot be undone.');">
                   {% csrf_token %}
+                  <input type="hidden" name="mode" value="chain">
                   <input type="hidden" name="pid" value="{{ row.blocking_pid }}">
                   <input type="hidden" name="pid" value="{{ row.blocked_pid }}">
                   <input type="hidden" name="query" value="chain: {{ row.blocking_query|truncatechars:250 }} | {{ row.blocked_query|truncatechars:250 }}">
-                  <button class="btn btn-danger" type="submit">Kill entire chain</button>
+                  <button class="btn btn-danger btn-sm" type="submit">Kill entire chain</button>
                 </form>
               </div>
               {% endif %}
@@ -75,29 +91,34 @@
           {% endfor %}
         </tbody>
       </table>
-      {% if is_staff %}</div></form>{% endif %}
+      </div>
+      {% if is_staff %}</form>{% endif %}
     {% else %}
-      <p style="color:#666;margin:8px 0 0;">No blocking locks right now.</p>
+      <p style="color:var(--text-faint);margin:10px 0 0;font-size:13.5px;">No blocking locks right now.</p>
     {% endif %}
   </div>
 
   <div class="card" id="sessions" style="margin-top:16px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <strong>Sessions</strong>
+    <div class="card-header">
+      <div class="card-title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Sessions
+      </div>
       <span class="badge badge-muted">{{ activity|length }}</span>
     </div>
     {% if is_staff and activity %}
     <form id="sessions-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
-          onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirm('Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
+          onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
       {% csrf_token %}
+      <input type="hidden" name="mode" value="bulk">
       <div class="bulk-bar">
-        <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;">
+        <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;color:var(--text-muted);">
           <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('#sessions-bulk-form input[name=pid]').forEach(function(cb){cb.checked=this.checked;}, this)"> select all
         </label>
-        <button class="btn btn-danger" type="submit" style="font-size:12px;padding:4px 10px;">Kill selected</button>
+        <button class="btn btn-danger btn-sm" type="submit">Kill selected</button>
       </div>
-    <div class="table-scroll">
     {% endif %}
+    <div class="table-scroll">
     <table style="margin-top:8px;">
       <thead>
         <tr>{% if is_staff %}<th></th>{% endif %}<th>PID</th><th>User</th><th>State</th><th>Wait event</th><th>Duration (s)</th><th>Query</th>{% if is_staff %}<th></th>{% endif %}</tr>
@@ -119,17 +140,17 @@
             {% if "idle in transaction" in row.state %}<span class="badge badge-warn" style="margin-left:4px;">idle-in-txn</span>{% endif %}
           </td>
           <td>{{ row.wait_event|default:"—" }}</td>
-          <td>{% if row.duration_seconds >= 30 %}<strong style="color:#a30000;">{{ row.duration_seconds }}</strong>{% else %}{{ row.duration_seconds|default:"—" }}{% endif %}</td>
+          <td>{% if row.duration_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.duration_seconds }}</strong>{% else %}{{ row.duration_seconds|default:"—" }}{% endif %}</td>
           <td><code>{{ row.query|truncatechars:80 }}</code></td>
           {% if is_staff %}
           <td>
             {% if row.pid not in blocking_pids %}
             <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
-                  onsubmit="return confirm('Terminate backend pid {{ row.pid }} on {{ instance.name }}? This cannot be undone.');">
+                  onsubmit="return confirmKill(event, 'Terminate backend pid {{ row.pid }} on {{ instance.name }}? This cannot be undone.');">
               {% csrf_token %}
               <input type="hidden" name="pid" value="{{ row.pid }}">
               <input type="hidden" name="query" value="{{ row.query|truncatechars:500 }}">
-              <button class="btn btn-muted" type="submit">Kill</button>
+              <button class="btn btn-muted btn-sm" type="submit">Kill</button>
             </form>
             {% else %}
             <a href="#locks" style="font-size:12px;">see locks &uarr;</a>
@@ -138,11 +159,12 @@
           {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="{% if is_staff %}7{% else %}6{% endif %}">No active sessions.</td></tr>
+        <tr><td colspan="{% if is_staff %}7{% else %}6{% endif %}" style="text-align:center;color:var(--text-faint);padding:20px;">No active sessions.</td></tr>
         {% endfor %}
       </tbody>
     </table>
-    {% if is_staff and activity %}</div></form>{% endif %}
+    </div>
+    {% if is_staff and activity %}</form>{% endif %}
   </div>
 
 {% endif %}

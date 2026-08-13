@@ -197,13 +197,14 @@ def kill_chain(request, pk):
 
     pids = [int(p) for p in request.POST.getlist("pid")]
     query_snapshot = request.POST.get("query", "")
+    action = "kill_chain" if request.POST.get("mode") == "chain" else "bulk_kill"
 
     try:
         results = db.kill_pids(instance, pids)
         terminated = [pid for pid, ok in results.items() if ok]
         not_running = [pid for pid, ok in results.items() if not ok]
         _log_audit(
-            instance, "kill_chain", request.user,
+            instance, action, request.user,
             query=query_snapshot,
             result="success" if terminated else "failed",
             detail=f"pids={pids} terminated={terminated} not_running={not_running}",
