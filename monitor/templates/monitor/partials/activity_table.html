@@ -10,37 +10,60 @@
 
   {% if vitals %}
   <div class="vitals-grid">
-    <div class="vital">
-      <div class="vital-top">
-        <span class="vital-label">Connections</span>
-        {% if conn_pct is not None %}<span class="vital-foot">{{ conn_pct }}% of {{ vitals.max_conns }}</span>{% endif %}
+    <div class="vital" style="--accent:var(--brand);">
+      <span class="vital-icon" style="background:var(--brand-soft);color:var(--brand);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      </span>
+      <div class="vital-body">
+        <div class="vital-top">
+          <span class="vital-label">Connections</span>
+          {% if conn_pct is not None %}<span class="vital-foot">{{ conn_pct }}% of {{ vitals.max_conns }}</span>{% endif %}
+        </div>
+        <div class="vital-value">{{ vitals.total_conns }}<span class="vital-sub"> / {{ vitals.max_conns }}</span></div>
+        {% if conn_pct is not None %}
+        <div class="vital-meter"><span style="width:{{ conn_pct }}%;background:{% if conn_pct >= 90 %}var(--danger-dot){% elif conn_pct >= 75 %}var(--warn-dot){% else %}var(--ok-dot){% endif %};"></span></div>
+        {% endif %}
       </div>
-      <div class="vital-value">{{ vitals.total_conns }}<span class="vital-sub"> / {{ vitals.max_conns }}</span></div>
-      {% if conn_pct is not None %}
-      <div class="vital-meter"><span style="width:{{ conn_pct }}%;background:{% if conn_pct >= 90 %}var(--danger-dot){% elif conn_pct >= 75 %}var(--warn-dot){% else %}var(--ok-dot){% endif %};"></span></div>
-      {% endif %}
     </div>
-    <div class="vital">
-      <div class="vital-top"><span class="vital-label">Active / Idle</span></div>
-      <div class="vital-value">{{ vitals.active_conns }}<span class="vital-sub"> active</span></div>
-      <div class="vital-foot">{{ vitals.idle_conns }} idle{% if vitals.idle_in_txn %} · <span style="color:var(--warn-fg);">{{ vitals.idle_in_txn }} idle-in-txn</span>{% endif %}</div>
+    <div class="vital" style="--accent:var(--ok-dot);">
+      <span class="vital-icon" style="background:var(--ok-bg);color:var(--ok-fg);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </span>
+      <div class="vital-body">
+        <div class="vital-top"><span class="vital-label">Active / Idle</span></div>
+        <div class="vital-value">{{ vitals.active_conns }}<span class="vital-sub"> active</span></div>
+        <div class="vital-foot">{{ vitals.idle_conns }} idle{% if vitals.idle_in_txn %} · <span style="color:var(--warn-fg);font-weight:600;">{{ vitals.idle_in_txn }} idle-in-txn</span>{% endif %}</div>
+      </div>
     </div>
-    <div class="vital">
-      <div class="vital-top"><span class="vital-label">Longest active query</span></div>
-      <div class="vital-value" style="{% if vitals.longest_active_seconds >= 60 %}color:var(--danger-fg);{% elif vitals.longest_active_seconds >= 30 %}color:var(--warn-fg);{% endif %}">{{ vitals.longest_active_human }}</div>
-      <div class="vital-foot">{% if vitals.waiting_on_locks %}<span style="color:var(--danger-fg);">{{ vitals.waiting_on_locks }} waiting on locks</span>{% else %}none waiting on locks{% endif %}</div>
+    <div class="vital" style="--accent:{% if vitals.longest_active_seconds >= 60 %}var(--danger-dot){% elif vitals.longest_active_seconds >= 30 %}var(--warn-dot){% else %}var(--accent){% endif %};">
+      <span class="vital-icon" style="{% if vitals.longest_active_seconds >= 60 %}background:var(--danger-bg);color:var(--danger-fg);{% elif vitals.longest_active_seconds >= 30 %}background:var(--warn-bg);color:var(--warn-fg);{% else %}background:var(--surface-3);color:var(--text-muted);{% endif %}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </span>
+      <div class="vital-body">
+        <div class="vital-top"><span class="vital-label">Longest active query</span></div>
+        <div class="vital-value" style="{% if vitals.longest_active_seconds >= 60 %}color:var(--danger-fg);{% elif vitals.longest_active_seconds >= 30 %}color:var(--warn-fg);{% endif %}">{{ vitals.longest_active_human }}</div>
+        <div class="vital-foot">{% if vitals.waiting_on_locks %}<span style="color:var(--danger-fg);font-weight:600;">{{ vitals.waiting_on_locks }} waiting on locks</span>{% else %}none waiting on locks{% endif %}</div>
+      </div>
     </div>
-    <div class="vital">
-      <div class="vital-top"><span class="vital-label">Database size</span></div>
-      <div class="vital-value">{{ vitals.db_size }}</div>
+    <div class="vital" style="--accent:var(--text-faint);">
+      <span class="vital-icon" style="background:var(--surface-3);color:var(--text-muted);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+      </span>
+      <div class="vital-body">
+        <div class="vital-top"><span class="vital-label">Database size</span></div>
+        <div class="vital-value">{{ vitals.db_size }}</div>
+      </div>
     </div>
   </div>
   <style>
-    .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 16px; }
-    .vital { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 13px; box-shadow: var(--shadow-sm); }
+    .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .vital { position: relative; display: flex; align-items: flex-start; gap: 11px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 11px 13px; box-shadow: var(--shadow-sm); overflow: hidden; }
+    .vital::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: .9; }
+    .vital-icon { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+    .vital-body { min-width: 0; flex: 1; }
     .vital-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-    .vital-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
-    .vital-value { font-family: var(--font-mono); font-size: 18px; font-weight: 700; letter-spacing: -.03em; margin-top: 2px; line-height: 1.15; }
+    .vital-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); white-space: nowrap; }
+    .vital-value { font-family: var(--font-mono); font-size: 19px; font-weight: 700; letter-spacing: -.03em; margin-top: 2px; line-height: 1.15; }
     .vital-sub { font-size: 12px; font-weight: 500; color: var(--text-faint); }
     .vital-foot { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
     .vital-meter { height: 4px; border-radius: 3px; background: var(--surface-3); overflow: hidden; margin-top: 6px; }

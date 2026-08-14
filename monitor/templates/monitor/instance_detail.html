@@ -174,7 +174,8 @@
       if (!el) return;
       var url = el.getAttribute('hx-get');
       if (!url || typeof htmx === 'undefined') return;
-      htmx.ajax('GET', url, { target: '#' + id, swap: 'innerHTML' });
+      // show:none stops htmx from scrolling the swapped element into view.
+      htmx.ajax('GET', url, { target: '#' + id, swap: 'innerHTML show:none' });
     });
     pollRemaining = pollIntervalSec;
   }
@@ -208,6 +209,21 @@
       if (pollRemaining <= 0) pollRefresh();
     }
     setInterval(tick, 1000);
+
+    // Pin scroll position across the swap so an auto-refresh never jumps the
+    // page up/down when a table's row-count (and height) changes.
+    var savedScrollY = null;
+    document.body.addEventListener('htmx:beforeSwap', function (e) {
+      if (e.target && POLL_TARGETS.indexOf(e.target.id) !== -1) savedScrollY = window.scrollY;
+    });
+    function restoreScroll(e) {
+      if (savedScrollY !== null && e.target && POLL_TARGETS.indexOf(e.target.id) !== -1) {
+        var y = savedScrollY;
+        window.scrollTo(0, y);
+        requestAnimationFrame(function () { window.scrollTo(0, y); });
+      }
+    }
+    document.body.addEventListener('htmx:afterSwap', restoreScroll);
 
     document.body.addEventListener('htmx:beforeRequest', function (e) {
       if (e.target && POLL_TARGETS.indexOf(e.target.id) !== -1) {
