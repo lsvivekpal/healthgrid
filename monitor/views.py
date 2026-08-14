@@ -25,6 +25,19 @@ def _require_staff(request):
         raise PermissionDenied("Staff permission required for this action.")
 
 
+def _fmt_duration(seconds):
+    """Compact human duration: 45s, 3m 12s, 1h 04m."""
+    try:
+        seconds = int(seconds or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60:02d}s"
+    return f"{seconds // 3600}h {(seconds % 3600) // 60:02d}m"
+
+
 def _log_audit(instance, action, user, *, pid=None, query="", result="success", detail=""):
     AuditLog.objects.create(
         instance=instance,
@@ -104,16 +117,22 @@ def activity_table_partial(request, pk):
     cache_key = f"activity:{instance.pk}"
     cached = cache.get(cache_key)
     if cached is not None:
-        activity, blocking, error = cached
+        activity, blocking, vitals, top_tables, error = cached
     else:
         try:
-            activity, blocking = db.fetch_activity(instance)
+            activity, blocking, vitals, top_tables = db.fetch_activity_with_vitals(instance)
             error = None
         except db.ConnectionError as exc:
-            activity, blocking, error = [], [], str(exc)
-        cache.set(cache_key, (activity, blocking, error), timeout=settings.ACTIVITY_CACHE_TTL)
+            activity, blocking, vitals, top_tables, error = [], [], None, [], str(exc)
+        cache.set(cache_key, (activity, blocking, vitals, top_tables, error), timeout=settings.ACTIVITY_CACHE_TTL)
 
     blocking_pids = {row["blocking_pid"] for row in blocking}
+    conn_pct = None
+    if vitals:
+        vitals = dict(vitals)
+        vitals["longest_active_human"] = _fmt_duration(vitals.get("longest_active_seconds"))
+        if vitals.get("max_conns"):
+            conn_pct = round(100.0 * vitals["total_conns"] / vitals["max_conns"], 1)
     return render(
         request,
         "monitor/partials/activity_table.html",
@@ -122,10 +141,89 @@ def activity_table_partial(request, pk):
             "activity": activity,
             "blocking": blocking,
             "blocking_pids": blocking_pids,
+            "vitals": vitals,
+            "conn_pct": conn_pct,
+            "top_tables": top_tables,
             "error": error,
             "is_staff": request.user.is_staff,
         },
     )
+
+
+@login_required
+def replication_slots_partial(request, pk):
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    cache_key = f"repslots:{instance.pk}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        slots, error = cached
+    else:
+        try:
+            slots, error = db.fetch_replication_slots(instance), None
+        except db.ConnectionError as exc:
+            slots, error = [], str(exc)
+        cache.set(cache_key, (slots, error), timeout=settings.ACTIVITY_CACHE_TTL)
+
+    return render(
+        request,
+        "monitor/partials/replication_slots.html",
+        {"instance": instance, "slots": slots, "error": error, "is_staff": request.user.is_staff},
+    )
+
+
+@login_required
+@require_POST
+def kill_replication_slot(request, pk):
+    """Terminate the walsender backend behind a slot — a prerequisite for dropping it."""
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_staff(request)
+    slot_name = request.POST.get("slot_name", "")
+
+    try:
+        terminated = db.terminate_replication_slot_backend(instance, slot_name)
+        _log_audit(
+            instance, "kill_replication_slot", request.user,
+            detail=slot_name,
+            result="success" if terminated else "failed",
+        )
+        if terminated:
+            messages.success(request, f"Terminated the active backend for slot '{slot_name}'.")
+        else:
+            messages.warning(request, f"Slot '{slot_name}' has no active backend right now.")
+    except db.ConnectionError as exc:
+        _log_audit(instance, "kill_replication_slot", request.user, detail=f"{slot_name}: {exc}", result="failed")
+        messages.error(request, f"Could not connect: {exc}")
+
+    cache.delete(f"repslots:{instance.pk}")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def drop_replication_slot(request, pk):
+    """Drop a replication slot entirely. Irreversible — any consumer attached to
+    it will need to resync from scratch. Fails if the slot is still active."""
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_staff(request)
+    slot_name = request.POST.get("slot_name", "")
+
+    try:
+        ok, error = db.drop_replication_slot(instance, slot_name)
+        _log_audit(
+            instance, "drop_replication_slot", request.user,
+            detail=slot_name if ok else f"{slot_name}: {error}",
+            result="success" if ok else "failed",
+        )
+        if ok:
+            messages.success(request, f"Dropped replication slot '{slot_name}'.")
+        else:
+            messages.error(request, f"Could not drop slot '{slot_name}': {error}")
+    except db.ConnectionError as exc:
+        _log_audit(instance, "drop_replication_slot", request.user, detail=f"{slot_name}: {exc}", result="failed")
+        messages.error(request, f"Could not connect: {exc}")
+
+    cache.delete(f"repslots:{instance.pk}")
+    return redirect("instance-detail", pk=instance.pk)
 
 
 @login_required
@@ -155,6 +253,33 @@ def download_locks(request, pk):
             row["blocked_pid"], row["blocked_user"], row["blocked_query"],
             row["blocking_pid"], row["blocking_user"], row["blocking_query"],
             row["waiting_seconds"],
+        ])
+    return response
+
+
+@login_required
+def download_sessions(request, pk):
+    """CSV of current sessions (active + idle-in-transaction), full untruncated
+    query text — same convenience as the locks CSV download."""
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    try:
+        activity, _blocking = db.fetch_activity(instance)
+    except db.ConnectionError as exc:
+        messages.error(request, f"Could not fetch sessions to download: {exc}")
+        return redirect("instance-detail", pk=instance.pk)
+
+    timestamp = timezone.now().strftime("%Y%m%d-%H%M%S")
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{instance.db_identifier}-sessions-{timestamp}.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(["captured_at", "pid", "usename", "state", "wait_event", "duration_seconds", "query"])
+    captured_at = timezone.now().isoformat()
+    for row in activity:
+        writer.writerow([
+            captured_at,
+            row["pid"], row["usename"], row["state"], row.get("wait_event"),
+            row["duration_seconds"], row["query"],
         ])
     return response
 

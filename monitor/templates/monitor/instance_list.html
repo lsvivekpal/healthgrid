@@ -1,12 +1,12 @@
 {% extends "monitor/base.html" %}
 {% block title %}Instances &middot; RDS Dashboard{% endblock %}
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:10px;">
+<div class="page-header-row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:10px;">
   <div>
     <h2 style="margin:0;">RDS Instances</h2>
     <div class="section-hint" style="margin-top:2px;">Live lock &amp; session visibility across registered databases</div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;">
+  <div class="page-header-actions" style="display:flex;align-items:center;gap:12px;">
     <span id="list-refresh-spinner" class="htmx-indicator" style="font-size:12px;color:var(--brand);"><span class="spinner"></span>refreshing…</span>
     {% if user.is_staff %}
       <a class="btn btn-primary" href="{% url 'instance-add' %}">
@@ -18,29 +18,45 @@
 </div>
 
 {% if instances %}
-<div id="stats-bar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:18px 0 22px;">
-  <div class="card" style="margin-bottom:0;padding:14px 16px;">
-    <div class="section-hint">Total instances</div>
-    <div id="stat-total" style="font-size:22px;font-weight:700;margin-top:2px;">{{ instances|length }}</div>
+<div id="stats-bar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:20px 0 24px;">
+  <div class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
+    <span class="kpi-icon" style="background:var(--brand-soft);color:var(--brand);">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    </span>
+    <div><div class="section-hint">Total instances</div><div id="stat-total" class="kpi-num">{{ instances|length }}</div></div>
   </div>
-  <div class="card" style="margin-bottom:0;padding:14px 16px;">
-    <div class="section-hint">Healthy</div>
-    <div id="stat-healthy" style="font-size:22px;font-weight:700;margin-top:2px;color:var(--ok-fg);">—</div>
+  <div class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
+    <span class="kpi-icon" style="background:var(--ok-bg);color:var(--ok-fg);">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    </span>
+    <div><div class="section-hint">Healthy</div><div id="stat-healthy" class="kpi-num" style="color:var(--ok-fg);">—</div></div>
   </div>
-  <div class="card" style="margin-bottom:0;padding:14px 16px;">
-    <div class="section-hint">Blocked locks</div>
-    <div id="stat-blocked" style="font-size:22px;font-weight:700;margin-top:2px;color:var(--danger-fg);">—</div>
+  <div class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
+    <span class="kpi-icon" style="background:var(--danger-bg);color:var(--danger-fg);">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    </span>
+    <div><div class="section-hint">Blocked locks</div><div id="stat-blocked" class="kpi-num" style="color:var(--danger-fg);">—</div></div>
   </div>
-  <div class="card" style="margin-bottom:0;padding:14px 16px;">
-    <div class="section-hint">Unreachable</div>
-    <div id="stat-unreachable" style="font-size:22px;font-weight:700;margin-top:2px;color:var(--warn-fg);">—</div>
+  <div class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
+    <span class="kpi-icon" style="background:var(--warn-bg);color:var(--warn-fg);">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </span>
+    <div><div class="section-hint">Unreachable</div><div id="stat-unreachable" class="kpi-num" style="color:var(--warn-fg);">—</div></div>
   </div>
 </div>
+<style>
+  .kpi-icon { width: 38px; height: 38px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .kpi-num { font-size: 24px; font-weight: 700; line-height: 1.1; margin-top: 3px; font-family: var(--font-mono); letter-spacing: -.03em; }
+  .kpi { transition: border-color 120ms ease, box-shadow 120ms ease; }
+  .kpi:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+</style>
 {% endif %}
 
 {% if not instances %}
   <div class="empty-state card">
-    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    <span class="empty-icon">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    </span>
     <h3>No instances registered yet</h3>
     <p>Add an RDS Postgres endpoint to start monitoring locks and sessions.</p>
     {% if user.is_staff %}<a class="btn btn-primary" href="{% url 'instance-add' %}">Add your first instance</a>{% endif %}

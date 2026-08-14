@@ -1,0 +1,68 @@
+{% if error %}
+  <div class="card">
+    <div class="card-title" style="color:var(--warn-fg);">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Unreachable
+    </div>
+    <code style="display:block;margin-top:8px;white-space:pre-wrap;">{{ error }}</code>
+  </div>
+{% else %}
+  <div class="card" id="replication-slots">
+    <div class="card-header">
+      <div class="card-title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Replication slots
+      </div>
+      <span class="badge badge-muted">{{ slots|length }}</span>
+    </div>
+    {% if slots %}
+    <div class="table-scroll">
+    <table class="responsive-table" style="margin-top:8px;">
+      <thead>
+        <tr><th>Slot</th><th>Type</th><th>Plugin</th><th>Database</th><th>Status</th><th>Retained WAL</th>{% if is_staff %}<th></th>{% endif %}</tr>
+      </thead>
+      <tbody>
+        {% for slot in slots %}
+        <tr class="{% if not slot.active %}row-warn{% endif %}">
+          <td data-label="Slot"><code>{{ slot.slot_name }}</code></td>
+          <td data-label="Type">{{ slot.slot_type }}</td>
+          <td data-label="Plugin">{{ slot.plugin|default:"—" }}</td>
+          <td data-label="Database">{{ slot.database|default:"—" }}</td>
+          <td data-label="Status">
+            {% if slot.active %}
+              <span class="badge badge-ok">active (pid {{ slot.active_pid }})</span>
+            {% else %}
+              <span class="badge badge-warn">inactive</span>
+            {% endif %}
+          </td>
+          <td data-label="Retained WAL">{{ slot.retained_wal|default:"—" }}</td>
+          {% if is_staff %}
+          <td>
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+              {% if slot.active %}
+              <form class="inline" method="post" action="{% url 'instance-kill-replication-slot' instance.pk %}"
+                    onsubmit="return confirmKill(event, 'Terminate the active backend for replication slot &quot;{{ slot.slot_name }}&quot; on {{ instance.name }}? Its consumer will need to reconnect.');">
+                {% csrf_token %}
+                <input type="hidden" name="slot_name" value="{{ slot.slot_name }}">
+                <button class="btn btn-muted btn-sm" type="submit">Terminate backend</button>
+              </form>
+              {% endif %}
+              <form class="inline" method="post" action="{% url 'instance-drop-replication-slot' instance.pk %}"
+                    onsubmit="return confirmKill(event, 'Permanently DROP replication slot &quot;{{ slot.slot_name }}&quot; on {{ instance.name }}? Any consumer using it will need to fully resync. This cannot be undone.{% if slot.active %} It is currently active — dropping will fail until its backend is terminated.{% endif %}');">
+                {% csrf_token %}
+                <input type="hidden" name="slot_name" value="{{ slot.slot_name }}">
+                <button class="btn btn-danger btn-sm" type="submit">Drop slot</button>
+              </form>
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+      <p style="color:var(--text-faint);margin:10px 0 0;font-size:13.5px;">No replication slots on this instance.</p>
+    {% endif %}
+  </div>
+{% endif %}

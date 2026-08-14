@@ -13,9 +13,10 @@
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
     <div style="flex:1;min-width:220px;">
-      <div id="name-display" style="display:flex;align-items:center;gap:10px;">
+      <div id="name-display" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);flex-shrink:0;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
         <h2 style="margin:0;">{{ instance.name }}</h2>
+        <span id="status-badge" class="badge badge-muted">checking…</span>
         {% if user.is_staff %}
         <a href="#" onclick="document.getElementById('name-display').style.display='none';document.getElementById('name-edit').style.display='flex';document.getElementById('id_rename').focus();return false;" style="font-size:12px;color:var(--text-faint);">rename</a>
         {% endif %}
@@ -31,7 +32,14 @@
       <div class="kv-grid" style="margin-top:8px;">
         <span>id: <b>{{ instance.db_identifier }}</b></span>
         <span>region: <b>{{ instance.region }}</b></span>
-        <span>endpoint: <b>{{ instance.host }}:{{ instance.port }}/{{ instance.db_name }}</b></span>
+        <span style="display:inline-flex;align-items:center;gap:5px;">
+          endpoint: <b>{{ instance.host }}:{{ instance.port }}/{{ instance.db_name }}</b>
+          <button type="button" class="icon-btn" id="copy-endpoint-btn" title="Copy endpoint" onclick="copyEndpoint(this)">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </span>
+        {% if instance.added_by %}<span>added by: <b>{{ instance.added_by }}</b></span>{% endif %}
+        <span>since: <b>{{ instance.created_at|date:"Y-m-d" }}</b></span>
       </div>
     </div>
   </div>
@@ -53,15 +61,33 @@
   {% endif %}
 </div>
 
-<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:24px;">
-  <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
-    Locks &amp; sessions
-    <span class="section-hint">refreshes every 15s</span>
-  </h3>
-  <div style="display:flex;align-items:center;gap:10px;">
-    <span id="refresh-spinner" class="htmx-indicator" style="font-size:12px;color:var(--brand);"><span class="spinner"></span>refreshing…</span>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:16px;">
+  <a href="#locks" class="btn btn-ghost btn-sm">Locks <span id="pill-locks" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
+  <a href="#sessions" class="btn btn-ghost btn-sm">Sessions <span id="pill-sessions" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
+  <a href="#replication-slots" class="btn btn-ghost btn-sm">Replication slots <span id="pill-slots" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
+  <a href="#audit-log" class="btn btn-ghost btn-sm">Audit log</a>
+</div>
+
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:22px;">
+  <h3 style="margin:0;display:flex;align-items:center;gap:8px;">Live activity</h3>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span id="refresh-spinner" style="display:none;font-size:12px;color:var(--brand);align-items:center;"><span class="spinner"></span>refreshing…</span>
+    <span id="refresh-countdown" class="section-hint" style="min-width:96px;text-align:right;"></span>
+    <div style="display:inline-flex;align-items:center;gap:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 4px 2px 9px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint);"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      <select id="poll-interval" onchange="setPollInterval(this.value)" style="border:none;background:transparent;color:var(--text);font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:4px 2px;outline:none;">
+        <option value="5">5s</option>
+        <option value="10">10s</option>
+        <option value="15" selected>15s</option>
+        <option value="30">30s</option>
+        <option value="60">60s</option>
+      </select>
+    </div>
+    <button type="button" id="refresh-now" class="btn btn-ghost btn-sm" title="Refresh now" onclick="pollRefresh()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    </button>
     <button type="button" id="poll-toggle" class="btn btn-ghost btn-sm"
-            onclick="window.dashboardPollingPaused = !window.dashboardPollingPaused; this.innerHTML = window.dashboardPollingPaused ? '&#9654; Resume' : '&#10073;&#10073; Pause';">&#10073;&#10073; Pause</button>
+            onclick="togglePolling()">&#10073;&#10073; Pause</button>
   </div>
 </div>
 
@@ -85,34 +111,164 @@
 </div>
 {% endif %}
 
-<script>window.dashboardPollingPaused = false;</script>
+<script>
+  function copyEndpoint(btn) {
+    var text = '{{ instance.host }}:{{ instance.port }}/{{ instance.db_name }}';
+    navigator.clipboard.writeText(text).then(function () {
+      var original = btn.innerHTML;
+      btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(function () { btn.innerHTML = original; }, 1200);
+    });
+  }
+
+  function updateStatusBadge() {
+    var badgeEl = document.getElementById('status-badge');
+    var activity = document.getElementById('activity');
+    if (!badgeEl || !activity) return;
+    var locksCard = activity.querySelector('#locks');
+    if (!locksCard) {
+      badgeEl.className = 'badge badge-warn';
+      badgeEl.textContent = 'unreachable';
+      return;
+    }
+    var blockedBadge = locksCard.querySelector('.badge-danger');
+    if (blockedBadge) {
+      badgeEl.className = 'badge badge-danger';
+      badgeEl.textContent = blockedBadge.textContent.trim() + ' blocked';
+    } else {
+      badgeEl.className = 'badge badge-ok';
+      badgeEl.textContent = 'healthy';
+    }
+  }
+
+  function updateSectionPills() {
+    var activity = document.getElementById('activity');
+    var slotsWrap = document.getElementById('replication-slots-wrap');
+    var pillLocks = document.getElementById('pill-locks');
+    var pillSessions = document.getElementById('pill-sessions');
+    var pillSlots = document.getElementById('pill-slots');
+    if (activity && pillLocks) {
+      var locksBadge = activity.querySelector('#locks .badge');
+      if (locksBadge) { pillLocks.textContent = locksBadge.textContent.trim(); pillLocks.style.display = 'inline-flex'; }
+    }
+    if (activity && pillSessions) {
+      var sessionsBadge = activity.querySelector('#sessions .badge');
+      if (sessionsBadge) { pillSessions.textContent = sessionsBadge.textContent.trim(); pillSessions.style.display = 'inline-flex'; }
+    }
+    if (slotsWrap && pillSlots) {
+      var slotsBadge = slotsWrap.querySelector('#replication-slots .badge');
+      if (slotsBadge) { pillSlots.textContent = slotsBadge.textContent.trim(); pillSlots.style.display = 'inline-flex'; }
+    }
+  }
+
+  // ---- JS-driven poller: dynamic interval, pause, manual refresh, countdown.
+  window.dashboardPollingPaused = false;
+  var POLL_TARGETS = ['activity', 'replication-slots-wrap'];
+  var pollIntervalSec = parseInt(localStorage.getItem('rds_poll_interval') || '15', 10);
+  var pollRemaining = pollIntervalSec;
+  var pollInFlight = 0;
+
+  function pollRefresh() {
+    POLL_TARGETS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var url = el.getAttribute('hx-get');
+      if (!url || typeof htmx === 'undefined') return;
+      htmx.ajax('GET', url, { target: '#' + id, swap: 'innerHTML' });
+    });
+    pollRemaining = pollIntervalSec;
+  }
+
+  function setPollInterval(sec) {
+    pollIntervalSec = parseInt(sec, 10);
+    pollRemaining = pollIntervalSec;
+    localStorage.setItem('rds_poll_interval', String(pollIntervalSec));
+  }
+
+  function togglePolling() {
+    window.dashboardPollingPaused = !window.dashboardPollingPaused;
+    var btn = document.getElementById('poll-toggle');
+    btn.innerHTML = window.dashboardPollingPaused ? '▶ Resume' : '❙❙ Pause';
+    if (!window.dashboardPollingPaused) { pollRemaining = pollIntervalSec; pollRefresh(); }
+  }
+
+  (function () {
+    var sel = document.getElementById('poll-interval');
+    if (sel) sel.value = String(pollIntervalSec);
+    var countdown = document.getElementById('refresh-countdown');
+    var spinner = document.getElementById('refresh-spinner');
+
+    function tick() {
+      if (countdown) {
+        if (window.dashboardPollingPaused) countdown.textContent = 'paused';
+        else countdown.textContent = 'refresh in ' + pollRemaining + 's';
+      }
+      if (window.dashboardPollingPaused) return;
+      pollRemaining -= 1;
+      if (pollRemaining <= 0) pollRefresh();
+    }
+    setInterval(tick, 1000);
+
+    document.body.addEventListener('htmx:beforeRequest', function (e) {
+      if (e.target && POLL_TARGETS.indexOf(e.target.id) !== -1) {
+        pollInFlight++;
+        if (spinner) spinner.style.display = 'inline-flex';
+      }
+    });
+    function requestDone(e) {
+      if (e.target && POLL_TARGETS.indexOf(e.target.id) !== -1) {
+        pollInFlight = Math.max(0, pollInFlight - 1);
+        if (pollInFlight === 0 && spinner) spinner.style.display = 'none';
+      }
+    }
+    document.body.addEventListener('htmx:afterRequest', requestDone);
+    document.body.addEventListener('htmx:afterSettle', function (e) {
+      if (!e.target) return;
+      if (e.target.id === 'activity') updateStatusBadge();
+      if (e.target.id === 'activity' || e.target.id === 'replication-slots-wrap') updateSectionPills();
+    });
+  })();
+</script>
 <div id="activity" style="margin-top:12px;"
      hx-get="{% url 'instance-activity' instance.pk %}"
-     hx-trigger="load, every 15s [!window.dashboardPollingPaused]"
-     hx-swap="innerHTML"
-     hx-indicator="#refresh-spinner">
+     hx-trigger="load"
+     hx-swap="innerHTML">
   <div class="card"><div class="skeleton" style="height:14px;width:30%;margin-bottom:10px;"></div><div class="skeleton" style="height:60px;width:100%;"></div></div>
 </div>
 
-<h3 style="margin-top:32px;display:flex;align-items:center;gap:8px;">
+<h3 style="margin-top:28px;display:flex;align-items:center;gap:8px;">Replication slots</h3>
+<div id="replication-slots-wrap" style="margin-top:12px;"
+     hx-get="{% url 'instance-replication-slots' instance.pk %}"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+  <div class="card"><div class="skeleton" style="height:14px;width:30%;margin-bottom:10px;"></div><div class="skeleton" style="height:40px;width:100%;"></div></div>
+</div>
+
+<h3 id="audit-log" style="margin-top:32px;display:flex;align-items:center;gap:8px;scroll-margin-top:16px;">
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
   Recent audit log
 </h3>
+{% if audit_logs %}
+<div style="position:relative;margin:10px 0;max-width:280px;">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-faint);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  <input type="text" placeholder="Filter audit log…" oninput="filterTable(this, 'audit-log-table')" style="padding-left:30px;font-size:13px;">
+</div>
+{% endif %}
 <div class="card table-scroll" style="padding:0;">
-<table>
+<table id="audit-log-table" class="responsive-table">
   <thead><tr><th>When</th><th>Action</th><th>PID</th><th>By</th><th>Result</th><th>Detail</th></tr></thead>
   <tbody>
     {% for log in audit_logs %}
     <tr>
-      <td style="white-space:nowrap;color:var(--text-muted);">{{ log.performed_at|date:"Y-m-d H:i:s" }}</td>
-      <td>{{ log.get_action_display }}</td>
-      <td>{{ log.target_pid|default:"—" }}</td>
-      <td>{{ log.performed_by|default:"—" }}</td>
-      <td>
+      <td data-label="When" style="white-space:nowrap;color:var(--text-muted);">{{ log.performed_at|date:"Y-m-d H:i:s" }}</td>
+      <td data-label="Action">{{ log.get_action_display }}</td>
+      <td data-label="PID">{{ log.target_pid|default:"—" }}</td>
+      <td data-label="By">{{ log.performed_by|default:"—" }}</td>
+      <td data-label="Result">
         {% if log.result == "success" %}<span class="badge badge-ok">success</span>
         {% else %}<span class="badge badge-danger">{{ log.result }}</span>{% endif %}
       </td>
-      <td><code>{{ log.detail|truncatechars:80 }}</code></td>
+      <td data-label="Detail"><code title="{{ log.detail }}">{{ log.detail|truncatechars:80 }}</code></td>
     </tr>
     {% empty %}
     <tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:20px;">No activity yet.</td></tr>

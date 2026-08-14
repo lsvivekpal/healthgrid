@@ -48,6 +48,51 @@ BLOCKING_QUERY = """
     WHERE NOT blocked_locks.granted;
 """
 
+# One-glance DB vitals: connection pressure, session mix, worst query age, size.
+# Longest-active excludes replication/background backends (backend_type =
+# 'client backend') so a long-lived walsender never shows as "the longest query".
+VITALS_QUERY = """
+    SELECT
+      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) AS total_conns,
+      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active') AS active_conns,
+      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'idle') AS idle_conns,
+      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state IN ('idle in transaction', 'idle in transaction (aborted)')) AS idle_in_txn,
+      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock') AS waiting_on_locks,
+      (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max_conns,
+      pg_size_pretty(pg_database_size(current_database())) AS db_size,
+      COALESCE((SELECT EXTRACT(EPOCH FROM (now() - min(query_start)))::int
+                FROM pg_stat_activity
+                WHERE datname = current_database() AND state = 'active'
+                  AND backend_type = 'client backend' AND query_start IS NOT NULL), 0) AS longest_active_seconds;
+"""
+
+# Top 10 largest tables by total size (heap + indexes + toast), reported in GB.
+# System schemas excluded. Cheap catalog read; safe to refresh with the poll.
+TOP_TABLES_QUERY = """
+    SELECT n.nspname || '.' || c.relname AS table_name,
+           pg_total_relation_size(c.oid) AS total_bytes,
+           round(pg_total_relation_size(c.oid) / 1073741824.0, 2) AS size_gb
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p', 'm')
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+    ORDER BY pg_total_relation_size(c.oid) DESC
+    LIMIT 10;
+"""
+
+
+# pg_current_wal_lsn() only works on a primary; guard it so this doesn't error
+# out when the monitored instance is a read replica.
+REPLICATION_SLOTS_QUERY = """
+    SELECT slot_name, plugin, slot_type, database, active, active_pid,
+           restart_lsn, confirmed_flush_lsn,
+           CASE WHEN pg_is_in_recovery() THEN NULL
+                ELSE pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn))
+           END AS retained_wal
+    FROM pg_replication_slots
+    ORDER BY slot_name;
+"""
+
 
 class ConnectionError(Exception):
     pass
@@ -84,6 +129,34 @@ def fetch_activity(instance):
         conn.close()
 
 
+def fetch_activity_with_vitals(instance):
+    """Return (activity_rows, blocking_rows, vitals_dict, top_tables) over one
+    connection. Used by the live dashboard so everything refreshes together."""
+    conn = get_connection(instance)
+    try:
+        conn.set_session(readonly=True, autocommit=True)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(ACTIVITY_QUERY)
+            activity = list(cur.fetchall())
+            cur.execute(BLOCKING_QUERY)
+            blocking = list(cur.fetchall())
+            try:
+                cur.execute(VITALS_QUERY)
+                vitals = cur.fetchone()
+            except Exception as exc:  # vitals are best-effort; never fail the page over them
+                logger.warning("vitals query failed for %s: %s", instance, exc)
+                vitals = None
+            try:
+                cur.execute(TOP_TABLES_QUERY)
+                top_tables = list(cur.fetchall())
+            except Exception as exc:
+                logger.warning("top-tables query failed for %s: %s", instance, exc)
+                top_tables = []
+        return activity, blocking, vitals, top_tables
+    finally:
+        conn.close()
+
+
 def kill_pid(instance, pid):
     """Terminate a backend on the target instance. Returns True if it was running."""
     conn = get_connection(instance)
@@ -109,6 +182,52 @@ def kill_pids(instance, pids):
                 (terminated,) = cur.fetchone()
                 results[pid] = bool(terminated)
         return results
+    finally:
+        conn.close()
+
+
+def fetch_replication_slots(instance):
+    conn = get_connection(instance)
+    try:
+        conn.set_session(readonly=True, autocommit=True)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(REPLICATION_SLOTS_QUERY)
+            return list(cur.fetchall())
+    finally:
+        conn.close()
+
+
+def terminate_replication_slot_backend(instance, slot_name):
+    """Terminate the walsender backend currently consuming a slot (if any),
+    e.g. so it can subsequently be dropped. Returns True if a backend was killed."""
+    conn = get_connection(instance)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT active_pid FROM pg_replication_slots WHERE slot_name = %s;", (slot_name,))
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return False
+            cur.execute("SELECT pg_terminate_backend(%s);", (row[0],))
+            (terminated,) = cur.fetchone()
+            return bool(terminated)
+    finally:
+        conn.close()
+
+
+def drop_replication_slot(instance, slot_name):
+    """Drop a replication slot outright. Fails if the slot is still active —
+    terminate its backend first. Returns (ok, error)."""
+    conn = get_connection(instance)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_drop_replication_slot(%s);", (slot_name,))
+        return True, None
+    except ConnectionError:
+        raise
+    except Exception as exc:
+        return False, str(exc)
     finally:
         conn.close()
 

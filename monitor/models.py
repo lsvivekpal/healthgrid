@@ -42,6 +42,8 @@ class AuditLog(models.Model):
         ("kill_session", "Kill session"),
         ("kill_chain", "Kill blocking chain"),
         ("bulk_kill", "Bulk kill selected"),
+        ("kill_replication_slot", "Kill replication slot backend"),
+        ("drop_replication_slot", "Drop replication slot"),
         ("add_instance", "Add instance"),
         ("remove_instance", "Remove instance"),
         ("rename_instance", "Rename instance"),
