@@ -370,6 +370,7 @@ def add_instance(request):
             port=request.POST.get("port") or 5432,
             db_name=request.POST["db_name"],
             username=request.POST["username"],
+            owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
             ssl_required=bool(request.POST.get("ssl_required")),
             added_by=request.user,
         )
@@ -388,6 +389,7 @@ def add_instance(request):
             "host": source.host,
             "port": source.port,
             "username": source.username,
+            "owner_teams_webhook_url": source.owner_teams_webhook_url,
             "password": source.get_password(),
             "ssl_required": source.ssl_required,
         }

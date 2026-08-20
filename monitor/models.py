@@ -12,6 +12,7 @@ class RDSInstance(models.Model):
     port = models.PositiveIntegerField(default=5432)
     db_name = models.CharField(max_length=255)
     username = models.CharField(max_length=255, help_text="DB login username")
+    owner_teams_webhook_url = models.URLField(blank=True, help_text="Teams Workflow webhook for this database owner")
     password_encrypted = models.CharField(
         max_length=512, help_text="Fernet-encrypted DB login password"
     )
@@ -68,3 +69,27 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} on {self.instance_name} @ {self.performed_at:%Y-%m-%d %H:%M:%S}"
+
+
+class LockAlert(models.Model):
+    """Persistent state for a lock observed by the background monitor."""
+
+    instance = models.ForeignKey(RDSInstance, on_delete=models.CASCADE, related_name="lock_alerts")
+    alert_key = models.CharField(max_length=255)
+    blocked_pid = models.IntegerField()
+    blocking_pid = models.IntegerField()
+    blocked_query = models.TextField(blank=True)
+    blocking_query = models.TextField(blank=True)
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    alerted_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["instance", "resolved_at"]),
+            models.Index(fields=["alert_key"]),
+        ]
+
+    def __str__(self):
+        return f"{self.instance.name}: {self.blocked_pid} blocked by {self.blocking_pid}"

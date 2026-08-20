@@ -28,3 +28,15 @@ Build Docker image:
   mid-investigation.  
 
 Open http://localhost:8000
+
+Lock alert monitor
+
+The Docker Compose `monitor-worker` service checks registered databases every 30 seconds. Run migrations before starting it, then configure the Teams Workflow webhook and SMTP settings in the environment:
+
+```env
+TEAMS_LOCK_WEBHOOK_URL=https://...
+LOCK_ALERT_THRESHOLD_SECONDS=120
+LOCK_MONITOR_INTERVAL_SECONDS=30
+```
+
+Add the shared Teams channel webhook in `TEAMS_LOCK_WEBHOOK_URL`, then add an optional owner Teams Workflow webhook for each database in the Add instance form. The worker posts the same alert to both destinations; no email is sent. It sends one alert after a lock has lasted two minutes and a resolved notification when that alerted lock disappears. For a one-time local check, run `python manage.py monitor_locks --once`; for continuous monitoring, run `python manage.py monitor_locks --interval 30`.

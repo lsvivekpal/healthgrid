@@ -76,6 +76,12 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Background lock alerting.
+LOCK_ALERT_THRESHOLD_SECONDS = int(os.environ.get("LOCK_ALERT_THRESHOLD_SECONDS", "120"))
+LOCK_MONITOR_INTERVAL_SECONDS = int(os.environ.get("LOCK_MONITOR_INTERVAL_SECONDS", "30"))
+TEAMS_LOCK_WEBHOOK_URL = os.environ.get("TEAMS_LOCK_WEBHOOK_URL", "")
+
+
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "instance-list"
 LOGOUT_REDIRECT_URL = "login"

@@ -46,6 +46,9 @@
     <label for="id_username">DB username</label>
     <input type="text" name="username" id="id_username" value="{{ prefill.username|default:"" }}" required placeholder="appuser">
 
+    <label for="id_owner_teams_webhook_url">Owner Teams webhook <span class="section-hint">(optional lock alerts)</span></label>
+    <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ prefill.owner_teams_webhook_url|default:"" }}" placeholder="https://...">
+
     <label for="id_password">DB password</label>
     <input type="password" name="password" id="id_password" value="{{ prefill.password|default:"" }}" required>
 

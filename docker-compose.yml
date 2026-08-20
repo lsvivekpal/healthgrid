@@ -14,6 +14,21 @@ services:
     depends_on:
       - target-db
 
+  # Same image as the web service, but runs the durable lock-alert monitor.
+  monitor-worker:
+    build: .
+    command: python manage.py monitor_locks --interval 30
+    volumes:
+      - .:/app
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: "local-dev-secret"
+      LOCK_MONITOR_INTERVAL_SECONDS: "30"
+      LOCK_ALERT_THRESHOLD_SECONDS: "${LOCK_ALERT_THRESHOLD_SECONDS:-120}"
+      TEAMS_LOCK_WEBHOOK_URL: "${TEAMS_LOCK_WEBHOOK_URL:-}"
+    depends_on:
+      - target-db
+
   # Throwaway Postgres standing in for a "monitored RDS instance" during local
   # verification of the lock-detection / kill flow. Not used for the app's own DB.
   target-db:

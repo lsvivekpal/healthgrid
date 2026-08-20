@@ -5,7 +5,7 @@ from .models import AuditLog, RDSInstance
 
 @admin.register(RDSInstance)
 class RDSInstanceAdmin(admin.ModelAdmin):
-    list_display = ("name", "db_identifier", "region", "host", "port", "is_active", "created_at")
+    list_display = ("name", "db_identifier", "owner_teams_webhook_url", "region", "host", "port", "is_active", "created_at")
     list_filter = ("region", "is_active")
     search_fields = ("name", "db_identifier", "host")
 

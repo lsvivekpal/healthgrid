@@ -2,10 +2,13 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from django.urls import reverse
+from datetime import timedelta
 
 from . import db
-from .models import AuditLog, RDSInstance
+from .models import AuditLog, LockAlert, RDSInstance
+from .management.commands.monitor_locks import lock_key, process_instance
 
 User = get_user_model()
 
@@ -139,3 +142,41 @@ class AddInstanceAuditTests(TestCase):
         instance = RDSInstance.objects.get(db_identifier="new-db")
         log = AuditLog.objects.get(action="add_instance", instance=instance)
         self.assertEqual(log.performed_by, staff)
+
+
+class LockMonitorTests(TestCase):
+    def test_alerts_after_threshold_and_notifies_when_cleared(self):
+        instance = make_instance(owner_teams_webhook_url="https://owner.example/webhook")
+        now = timezone.now()
+        row = {
+            "blocked_pid": 101,
+            "blocking_pid": 202,
+            "blocked_query": "UPDATE orders SET status = 'x'",
+            "blocking_query": "ALTER TABLE orders",
+            "blocked_query_start": now - timedelta(seconds=121),
+        }
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [row])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock", return_value=True) as notify:
+            alert = LockAlert.objects.create(
+                instance=instance,
+                alert_key=lock_key(row),
+                blocked_pid=row["blocked_pid"],
+                blocking_pid=row["blocking_pid"],
+                blocked_query=row["blocked_query"],
+                blocking_query=row["blocking_query"],
+                first_seen_at=now - timedelta(seconds=121),
+                last_seen_at=now - timedelta(seconds=30),
+            )
+            process_instance(instance, now=now)
+
+        alert.refresh_from_db()
+        self.assertIsNotNone(alert.alerted_at)
+        notify.assert_called_once_with(instance, alert)
+
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock", return_value=True) as notify:
+            process_instance(instance, now=now + timedelta(seconds=30))
+
+        alert.refresh_from_db()
+        self.assertIsNotNone(alert.resolved_at)
+        notify.assert_called_once_with(instance, alert, resolved=True)
