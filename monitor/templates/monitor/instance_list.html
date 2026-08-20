@@ -8,6 +8,11 @@
   </div>
   <div class="page-header-actions" style="display:flex;align-items:center;gap:12px;">
     <span id="list-refresh-spinner" class="htmx-indicator" style="font-size:12px;color:var(--brand);"><span class="spinner"></span>refreshing…</span>
+    <span id="list-refresh-countdown" class="section-hint" style="min-width:92px;text-align:right;"></span>
+    <button type="button" id="list-refresh-now" class="btn btn-ghost btn-sm" title="Refresh now" onclick="refreshInstanceCards()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    </button>
+    <button type="button" id="list-poll-toggle" class="btn btn-ghost btn-sm" onclick="toggleInstancePolling()">❙❙ Pause</button>
     {% if user.is_staff %}
       <a class="btn btn-primary" href="{% url 'instance-add' %}">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -31,14 +36,14 @@
     </span>
     <div><div class="section-hint">Healthy</div><div id="stat-healthy" class="kpi-num" style="color:var(--ok-fg);">—</div></div>
   </div>
-  <div class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
-    <span class="kpi-icon" style="background:var(--danger-bg);color:var(--danger-fg);">
+  <div id="stat-blocked-tile" class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
+    <span id="stat-blocked-icon" class="kpi-icon" style="background:var(--danger-bg);color:var(--danger-fg);">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
     </span>
     <div><div class="section-hint">Blocked locks</div><div id="stat-blocked" class="kpi-num" style="color:var(--danger-fg);">—</div></div>
   </div>
-  <div class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
-    <span class="kpi-icon" style="background:var(--warn-bg);color:var(--warn-fg);">
+  <div id="stat-unreachable-tile" class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
+    <span id="stat-unreachable-icon" class="kpi-icon" style="background:var(--warn-bg);color:var(--warn-fg);">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     </span>
     <div><div class="section-hint">Unreachable</div><div id="stat-unreachable" class="kpi-num" style="color:var(--warn-fg);">—</div></div>
@@ -67,7 +72,7 @@
   {% for instance in instances %}
     <div id="card-{{ instance.pk }}"
          hx-get="{% url 'instance-card' instance.pk %}"
-         hx-trigger="load, every 15s"
+         hx-trigger="load, refresh"
          hx-swap="innerHTML"
          hx-indicator="#list-refresh-spinner">
       <div class="card" style="margin-bottom:0;">
@@ -80,6 +85,42 @@
 </div>
 
 <script>
+  var INSTANCE_POLL_INTERVAL = 10;
+  var instancePollingPaused = false;
+  var instancePollRemaining = INSTANCE_POLL_INTERVAL;
+
+  function refreshInstanceCards() {
+    var cards = document.querySelectorAll('#card-grid > div');
+    cards.forEach(function (card) {
+      if (typeof htmx !== 'undefined') htmx.trigger(card, 'refresh');
+    });
+    instancePollRemaining = INSTANCE_POLL_INTERVAL;
+  }
+
+  function toggleInstancePolling() {
+    instancePollingPaused = !instancePollingPaused;
+    var button = document.getElementById('list-poll-toggle');
+    if (button) button.textContent = instancePollingPaused ? '▶ Resume' : '❙❙ Pause';
+    if (!instancePollingPaused) {
+      instancePollRemaining = INSTANCE_POLL_INTERVAL;
+      refreshInstanceCards();
+    }
+  }
+
+  function setKpiState(valueId, tileId, iconId, alertTone) {
+    var valueEl = document.getElementById(valueId);
+    var tileEl = document.getElementById(tileId);
+    var iconEl = document.getElementById(iconId);
+    if (!valueEl || !tileEl || !iconEl) return;
+    var clear = Number(valueEl.textContent) === 0;
+    var tone = clear ? 'ok' : alertTone;
+    valueEl.style.color = 'var(--' + tone + '-fg)';
+    iconEl.style.background = 'var(--' + tone + '-bg)';
+    iconEl.style.color = 'var(--' + tone + '-fg)';
+    tileEl.style.backgroundColor = 'var(--surface)';
+    tileEl.style.borderColor = 'var(--' + tone + '-border)';
+  }
+
   function recomputeStats() {
     var cards = document.querySelectorAll('#card-grid > div');
     var total = cards.length, healthy = 0, blocked = 0, unreachable = 0;
@@ -96,9 +137,24 @@
     if (elHealthy) elHealthy.textContent = healthy;
     if (elBlocked) elBlocked.textContent = blocked;
     if (elUnreachable) elUnreachable.textContent = unreachable;
+    setKpiState('stat-blocked', 'stat-blocked-tile', 'stat-blocked-icon', 'danger');
+    setKpiState('stat-unreachable', 'stat-unreachable-tile', 'stat-unreachable-icon', 'warn');
   }
   document.body.addEventListener('htmx:afterSettle', function (evt) {
     if (evt.target && evt.target.closest('#card-grid')) recomputeStats();
   });
+
+  (function () {
+    var countdown = document.getElementById('list-refresh-countdown');
+    setInterval(function () {
+      if (instancePollingPaused) {
+        if (countdown) countdown.textContent = 'paused';
+        return;
+      }
+      instancePollRemaining -= 1;
+      if (countdown) countdown.textContent = 'refresh in ' + instancePollRemaining + 's';
+      if (instancePollRemaining <= 0) refreshInstanceCards();
+    }, 1000);
+  })();
 </script>
 {% endblock %}

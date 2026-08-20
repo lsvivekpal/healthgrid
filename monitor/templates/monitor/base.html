@@ -196,6 +196,7 @@
     .messages .warning { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
 
     code { background: var(--surface-2); color: var(--text); padding: 2px 6px; border-radius: 5px; font-size: 12px; font-family: var(--font-mono); border: 1px solid var(--border); }
+    .query-preview { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 
     /* ---- Forms ---------------------------------------------------------- */
     form.inline { display: inline; }
@@ -219,7 +220,15 @@
     .table-scroll table { min-width: 640px; background: transparent; }
     .table-scroll table th:first-child { border-top-left-radius: var(--radius); }
     .table-scroll table th:last-child { border-top-right-radius: var(--radius); }
+    .table-sort { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+    .table-sort::after { content: '↕'; color: var(--text-faint); font-size: 12px; }
+    .table-sort[data-direction="asc"]::after { content: '↑'; color: var(--brand); }
+    .table-sort[data-direction="desc"]::after { content: '↓'; color: var(--brand); }
+    .table-sort:hover { color: var(--brand); }
     .bulk-bar { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+    .pid-selectors { display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+    .pid-selectors label { display: flex; align-items: center; gap: 5px; margin: 0; font-size: inherit; font-weight: 500; color: inherit; }
+    .pid-selectors input { width: auto; margin: 0; }
 
     .empty-state { text-align: center; padding: 56px 20px; color: var(--text-muted); }
     .empty-state .empty-icon { width: 56px; height: 56px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-faint); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px; }
@@ -393,7 +402,7 @@
       // mid-chain pid never gets swept up by a quick-select meant for one role.
       var form = document.getElementById('locks-bulk-form');
       if (!form) return;
-      var boxes = form.querySelectorAll('input[name=pid]');
+      var boxes = document.querySelectorAll('input[name=pid][form="' + form.id + '"]');
       var otherRole = role === 'blocking' ? 'blocked' : 'blocking';
       var otherValues = new Set();
       boxes.forEach(function (cb) { if (cb.dataset.role === otherRole) otherValues.add(cb.value); });
@@ -412,7 +421,7 @@
     // just browsing, actions surface only once something is actually selected.
     function updateBulkBar(form) {
       if (!form) return;
-      var n = form.querySelectorAll('input[name=pid]:checked').length;
+      var n = document.querySelectorAll('input[name=pid][form="' + form.id + '"]:checked').length;
       var btn = form.querySelector('.js-kill-selected-btn');
       if (btn) btn.style.display = n > 0 ? 'inline-flex' : 'none';
     }
@@ -431,7 +440,7 @@
       if (!form) return;
       updateBulkBar(form);
       var seen = {};
-      form.querySelectorAll('input[name=pid][data-action-target]').forEach(function (cb) {
+      document.querySelectorAll('input[name=pid][form="' + form.id + '"][data-action-target]').forEach(function (cb) {
         var id = cb.dataset.actionTarget;
         if (seen[id]) return;
         seen[id] = true;
@@ -465,6 +474,39 @@
         }
         tr.style.display = haystack.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
       });
+    }
+
+    function sortTable(tableId, columnIndex, type, button) {
+      var table = document.getElementById(tableId);
+      if (!table) return;
+      var tbody = table.tBodies[0];
+      if (!tbody) return;
+      var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+      var direction = table.dataset.sortColumn === String(columnIndex) && table.dataset.sortDirection === 'asc' ? 'desc' : 'asc';
+      table.dataset.sortColumn = String(columnIndex);
+      table.dataset.sortDirection = direction;
+      table.querySelectorAll('.table-sort').forEach(function (control) {
+        control.removeAttribute('data-direction');
+        control.closest('th').removeAttribute('aria-sort');
+      });
+      if (button) {
+        button.dataset.direction = direction;
+        button.closest('th').setAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
+      }
+      rows.sort(function (a, b) {
+        var aCell = a.children[columnIndex];
+        var bCell = b.children[columnIndex];
+        var aValue = aCell ? (aCell.dataset.sortValue || aCell.textContent).trim() : '';
+        var bValue = bCell ? (bCell.dataset.sortValue || bCell.textContent).trim() : '';
+        var comparison;
+        if (type === 'number') {
+          comparison = (Number(aValue) || 0) - (Number(bValue) || 0);
+        } else {
+          comparison = aValue.localeCompare(bValue, undefined, { sensitivity: 'base', numeric: true });
+        }
+        return direction === 'asc' ? comparison : -comparison;
+      });
+      rows.forEach(function (row) { tbody.appendChild(row); });
     }
   </script>
 </body>

@@ -94,37 +94,40 @@
       </div>
       {% if is_staff %}
       <form id="locks-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
-            onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
+            onsubmit="var n=document.querySelectorAll('input[name=pid][form=\'locks-bulk-form\']:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
         {% csrf_token %}
         <input type="hidden" name="mode" value="bulk">
         <div class="bulk-bar">
           <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;color:var(--text-muted);">
-            <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('#locks-bulk-form input[name=pid]').forEach(function(cb){cb.checked=this.checked;}, this); recomputeSelectionUI(document.getElementById('locks-bulk-form'));"> select all
+            <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('input[name=pid][form=\'locks-bulk-form\']').forEach(function(cb){cb.checked=this.checked;}, this); recomputeSelectionUI(document.getElementById('locks-bulk-form'));"> select all
           </label>
           <button class="btn btn-danger btn-sm js-kill-selected-btn" type="submit" style="display:none;">Kill selected</button>
           <button class="btn btn-ghost btn-sm" type="button" onclick="selectLockRole('blocking')" title="Only pids that are purely blocking — never also waiting themselves">Kill all blocking</button>
           <button class="btn btn-ghost btn-sm" type="button" onclick="selectLockRole('blocked')" title="Only pids that are purely waiting — never also blocking someone else">Kill all blocked</button>
         </div>
+      </form>
       {% endif %}
       <div class="table-scroll">
       <table id="locks-table" class="responsive-table" style="margin-top:8px;">
         <thead>
-          <tr>{% if is_staff %}<th></th>{% endif %}<th>Blocked pid</th><th>Waiting (s)</th><th>Blocked query</th><th>Blocking pid</th><th>Blocking query</th><th></th></tr>
+          <tr>{% if is_staff %}<th></th>{% endif %}<th>Blocked pid</th><th>Waiting</th><th>Blocked query</th><th>Blocking pid</th><th>Blocking query</th><th></th></tr>
         </thead>
         <tbody>
           {% for row in blocking %}
           <tr class="row-blocking">
             {% if is_staff %}
-            <td>
-              <input type="checkbox" name="pid" value="{{ row.blocking_pid }}" data-role="blocking" data-action-target="lock-actions-{{ forloop.counter0 }}" form="locks-bulk-form" title="select blocking pid {{ row.blocking_pid }}" style="width:auto;">
-              <input type="checkbox" name="pid" value="{{ row.blocked_pid }}" data-role="blocked" data-action-target="lock-actions-{{ forloop.counter0 }}" form="locks-bulk-form" title="select blocked pid {{ row.blocked_pid }}" style="width:auto;">
+            <td data-label="Select pids">
+              <div class="pid-selectors" title="Choose which backend to terminate">
+                <label><input type="checkbox" name="pid" value="{{ row.blocking_pid }}" data-role="blocking" data-action-target="lock-actions-{{ forloop.counter0 }}" form="locks-bulk-form" title="select blocking pid {{ row.blocking_pid }}"> blocker</label>
+                <label><input type="checkbox" name="pid" value="{{ row.blocked_pid }}" data-role="blocked" data-action-target="lock-actions-{{ forloop.counter0 }}" form="locks-bulk-form" title="select blocked pid {{ row.blocked_pid }}"> blocked</label>
+              </div>
             </td>
             {% endif %}
             <td data-label="Blocked pid">{{ row.blocked_pid }} <span style="color:var(--text-faint);">({{ row.blocked_user }})</span></td>
-            <td data-label="Waiting (s)">{% if row.waiting_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.waiting_seconds }}</strong>{% else %}{{ row.waiting_seconds }}{% endif %}</td>
-            <td data-label="Blocked query"><code title="{{ row.blocked_query }}">{{ row.blocked_query|truncatechars:60 }}</code></td>
+            <td data-label="Waiting" title="{{ row.waiting_seconds }} seconds">{% if row.waiting_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.waiting_seconds_human }}</strong>{% else %}{{ row.waiting_seconds_human }}{% endif %}</td>
+            <td data-label="Blocked query"><code class="query-preview" title="{{ row.blocked_query }}">{{ row.blocked_query|truncatechars:80 }}</code></td>
             <td data-label="Blocking pid">{{ row.blocking_pid }} <span style="color:var(--text-faint);">({{ row.blocking_user }})</span></td>
-            <td data-label="Blocking query"><code title="{{ row.blocking_query }}">{{ row.blocking_query|truncatechars:60 }}</code></td>
+            <td data-label="Blocking query"><code class="query-preview" title="{{ row.blocking_query }}">{{ row.blocking_query|truncatechars:80 }}</code></td>
             <td>
               {% if is_staff %}
               <div id="lock-actions-{{ forloop.counter0 }}" style="display:none;flex-direction:column;gap:4px;align-items:flex-start;">
@@ -159,7 +162,6 @@
         </tbody>
       </table>
       </div>
-      {% if is_staff %}</form>{% endif %}
     {% else %}
       <p style="color:var(--text-faint);margin:10px 0 0;font-size:13.5px;">No blocking locks right now.</p>
     {% endif %}
@@ -189,20 +191,31 @@
     {% endif %}
     {% if is_staff and activity %}
     <form id="sessions-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
-          onsubmit="var n=this.querySelectorAll('input[name=pid]:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
+          onsubmit="var n=document.querySelectorAll('input[name=pid][form=\'sessions-bulk-form\']:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
       {% csrf_token %}
       <input type="hidden" name="mode" value="bulk">
       <div class="bulk-bar">
         <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:400;font-size:12px;color:var(--text-muted);">
-          <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('#sessions-bulk-form input[name=pid]').forEach(function(cb){cb.checked=this.checked;}, this); recomputeSelectionUI(document.getElementById('sessions-bulk-form'));"> select all
+          <input type="checkbox" style="width:auto;" onclick="document.querySelectorAll('input[name=pid][form=\'sessions-bulk-form\']').forEach(function(cb){cb.checked=this.checked;}, this); recomputeSelectionUI(document.getElementById('sessions-bulk-form'));"> select all
         </label>
-        <button class="btn btn-danger btn-sm js-kill-selected-btn" type="submit" style="display:none;">Kill selected</button>
-      </div>
+          <button class="btn btn-danger btn-sm js-kill-selected-btn" type="submit" style="display:none;">Kill selected</button>
+        </div>
+      </form>
     {% endif %}
     <div class="table-scroll">
     <table id="sessions-table" class="responsive-table" style="margin-top:8px;">
       <thead>
-        <tr>{% if is_staff %}<th></th>{% endif %}<th>PID</th><th>User</th><th>Client / app</th><th>State</th><th>Wait event</th><th>Duration</th><th>Query</th>{% if is_staff %}<th></th>{% endif %}</tr>
+        <tr>
+          {% if is_staff %}<th></th>{% endif %}
+          <th><button type="button" class="table-sort" onclick="sortTable('sessions-table', this.closest('th').cellIndex, 'number', this)">PID</button></th>
+          <th><button type="button" class="table-sort" onclick="sortTable('sessions-table', this.closest('th').cellIndex, 'text', this)">User</button></th>
+          <th><button type="button" class="table-sort" onclick="sortTable('sessions-table', this.closest('th').cellIndex, 'text', this)">Client / app</button></th>
+          <th><button type="button" class="table-sort" onclick="sortTable('sessions-table', this.closest('th').cellIndex, 'text', this)">State</button></th>
+          <th><button type="button" class="table-sort" onclick="sortTable('sessions-table', this.closest('th').cellIndex, 'text', this)">Wait event</button></th>
+          <th><button type="button" class="table-sort" onclick="sortTable('sessions-table', this.closest('th').cellIndex, 'number', this)">Duration</button></th>
+          <th><button type="button" class="table-sort" onclick="sortTable('sessions-table', this.closest('th').cellIndex, 'text', this)">Query</button></th>
+          {% if is_staff %}<th></th>{% endif %}
+        </tr>
       </thead>
       <tbody>
         {% for row in activity %}
@@ -214,7 +227,7 @@
             {% endif %}
           </td>
           {% endif %}
-          <td data-label="PID">{{ row.pid }}</td>
+          <td data-label="PID" data-sort-value="{{ row.pid }}">{{ row.pid }}</td>
           <td data-label="User">{{ row.usename|default:"—" }}</td>
           <td data-label="Client / app">
             <span class="mono" style="font-size:12px;">{{ row.client_addr|default:"local" }}</span>
@@ -225,8 +238,8 @@
             {% if "idle in transaction" in row.state %}<span class="badge badge-warn" style="margin-left:4px;">idle-in-txn</span>{% endif %}
           </td>
           <td data-label="Wait event">{{ row.wait_event|default:"—" }}</td>
-          <td data-label="Duration">{% if row.duration_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.duration_seconds }}s</strong>{% else %}{{ row.duration_seconds }}s{% endif %}</td>
-          <td data-label="Query"><code title="{{ row.query }}">{{ row.query|truncatechars:80 }}</code></td>
+          <td data-label="Duration" data-sort-value="{{ row.duration_seconds }}" title="{{ row.duration_seconds }} seconds">{% if row.duration_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.duration_seconds_human }}</strong>{% else %}{{ row.duration_seconds_human }}{% endif %}</td>
+          <td data-label="Query"><code class="query-preview" title="{{ row.query }}">{{ row.query|truncatechars:72 }}</code></td>
           {% if is_staff %}
           <td>
             {% if row.pid not in blocking_pids %}
@@ -251,7 +264,6 @@
       </tbody>
     </table>
     </div>
-    {% if is_staff and activity %}</form>{% endif %}
   </div>
 
   {% if top_tables %}

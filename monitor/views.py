@@ -38,6 +38,16 @@ def _fmt_duration(seconds):
     return f"{seconds // 3600}h {(seconds % 3600) // 60:02d}m"
 
 
+def _with_human_durations(rows, field):
+    """Add a readable duration without losing the numeric value for sorting/color."""
+    formatted = []
+    for row in rows:
+        item = dict(row)
+        item[f"{field}_human"] = _fmt_duration(item.get(field))
+        formatted.append(item)
+    return formatted
+
+
 def _log_audit(instance, action, user, *, pid=None, query="", result="success", detail=""):
     AuditLog.objects.create(
         instance=instance,
@@ -126,6 +136,8 @@ def activity_table_partial(request, pk):
             activity, blocking, vitals, top_tables, error = [], [], None, [], str(exc)
         cache.set(cache_key, (activity, blocking, vitals, top_tables, error), timeout=settings.ACTIVITY_CACHE_TTL)
 
+    activity = _with_human_durations(activity, "duration_seconds")
+    blocking = _with_human_durations(blocking, "waiting_seconds")
     blocking_pids = {row["blocking_pid"] for row in blocking}
     conn_pct = None
     if vitals:
