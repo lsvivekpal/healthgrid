@@ -18,7 +18,7 @@ class RDSInstance(models.Model):
         blank=True,
         help_text="Optional dedicated monitoring/kill role; falls back to DB login username",
     )
-    owner_teams_webhook_url = models.URLField(blank=True, help_text="Teams Workflow webhook for this database owner")
+    owner_teams_webhook_url = models.URLField(max_length=2048, blank=True, help_text="Teams Workflow webhook for this database owner")
     password_encrypted = models.CharField(
         max_length=512, help_text="Fernet-encrypted DB login password"
     )
@@ -137,7 +137,7 @@ class LockNotificationState(models.Model):
 class NotificationSettings(models.Model):
     """Singleton configuration managed from the staff UI."""
 
-    channel_webhook_url = models.URLField(blank=True, help_text="Shared Teams channel Workflow webhook")
+    channel_webhook_url = models.URLField(max_length=2048, blank=True, help_text="Shared Teams channel Workflow webhook")
     threshold_seconds = models.PositiveIntegerField(default=120)
     interval_seconds = models.PositiveIntegerField(default=30)
     updated_at = models.DateTimeField(auto_now=True)

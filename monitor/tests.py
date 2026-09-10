@@ -327,6 +327,18 @@ class NotificationSettingsTests(TestCase):
         self.assertEqual(config.channel_webhook_url, "https://teams.example/webhook")
         self.assertEqual(config.threshold_seconds, 180)
 
+    def test_staff_can_save_long_teams_webhook_url(self):
+        staff = User.objects.create_user("long-webhook-staff", password="pw", is_staff=True)
+        self.client.login(username="long-webhook-staff", password="pw")
+        long_url = "https://teams.example/webhook?token=" + ("a" * 500)
+        response = self.client.post(reverse("notification-settings"), {
+            "channel_webhook_url": long_url,
+            "threshold_seconds": "120",
+            "interval_seconds": "30",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(NotificationSettings.objects.get(pk=1).channel_webhook_url, long_url)
+
     def test_non_staff_cannot_access_notification_settings(self):
         User.objects.create_user("settings-user", password="pw", is_staff=False)
         self.client.login(username="settings-user", password="pw")

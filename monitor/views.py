@@ -107,6 +107,15 @@ def notification_settings(request):
     config = NotificationSettings.load()
     if request.method == "POST":
         webhook_url = request.POST.get("channel_webhook_url", "").strip()
+        if len(webhook_url) > 2048:
+            messages.error(request, "The Teams webhook URL must be 2048 characters or fewer.")
+            return render(request, "monitor/notification_settings.html", {"notification_settings": config})
+        if webhook_url:
+            try:
+                URLValidator()(webhook_url)
+            except ValidationError:
+                messages.error(request, "Enter a valid Teams webhook URL or leave the field blank.")
+                return render(request, "monitor/notification_settings.html", {"notification_settings": config})
         try:
             threshold = int(request.POST.get("threshold_seconds", "120"))
             interval = int(request.POST.get("interval_seconds", "30"))
@@ -511,6 +520,9 @@ def update_owner_webhook(request, pk):
     _require_staff(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
     webhook_url = request.POST.get("owner_teams_webhook_url", "").strip()
+    if len(webhook_url) > 2048:
+        messages.error(request, "The Teams webhook URL must be 2048 characters or fewer.")
+        return redirect("instance-detail", pk=instance.pk)
     if webhook_url:
         try:
             URLValidator()(webhook_url)
