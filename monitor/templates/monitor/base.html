@@ -299,6 +299,7 @@
     <div class="toolbar">
       <button type="button" id="theme-toggle" class="icon-action" title="Toggle day/night mode" onclick="toggleTheme()"></button>
       {% if user.is_authenticated %}
+      {% if user.is_staff %}<a class="icon-action" href="{% url 'notification-settings' %}" title="Notification settings" aria-label="Notification settings">⚙</a>{% endif %}
       <div class="user-chip">
         <span class="avatar">{{ user.username|first }}</span>
         <span>{{ user.username }}</span>

@@ -4,11 +4,12 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 
 from . import db
-from .models import AuditLog, LockAlert, RDSInstance
+from .models import AuditLog, LockAlert, NotificationSettings, RDSInstance
 from .management.commands.monitor_locks import lock_key, process_instance
+from .notifications import _timestamp
 
 User = get_user_model()
 
@@ -50,6 +51,20 @@ class BlockingQueryParseTests(TestCase):
         self.assertEqual(activity, activity_rows)
         self.assertEqual(blocking, blocking_rows)
         self.assertTrue(fake_conn.closed)
+
+    @patch("monitor.db.psycopg2.connect")
+    def test_control_credentials_are_used_for_database_connections(self, connect):
+        instance = make_instance(control_username="db_lock_admin")
+        instance.set_control_password("controlpass")
+        instance.save(update_fields=["control_password_encrypted"])
+
+        db.get_connection(instance)
+
+        kwargs = connect.call_args.kwargs
+        self.assertEqual(kwargs["user"], "db_lock_admin")
+        self.assertEqual(kwargs["password"], "controlpass")
+        self.assertEqual(kwargs["application_name"], "rds-dashboard-control")
+        self.assertIn("statement_timeout=8000", kwargs["options"])
 
 
 class _FakeCursor:
@@ -145,6 +160,115 @@ class AddInstanceAuditTests(TestCase):
 
 
 class LockMonitorTests(TestCase):
+    def test_duplicate_lock_rows_create_one_incident(self):
+        instance = make_instance()
+        now = timezone.now()
+        first_row = {
+            "blocked_pid": 501,
+            "blocking_pid": 601,
+            "blocked_user": "app",
+            "blocking_user": "worker",
+            "blocked_query": "UPDATE orders",
+            "blocking_query": "ALTER TABLE orders",
+            "waiting_seconds": 180,
+        }
+        duplicate_row = {**first_row, "blocked_query": "UPDATE orders SET status = 'x'"}
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [first_row, duplicate_row])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now)
+
+        alert = LockAlert.objects.get(instance=instance, alert_key="501:601", resolved_at__isnull=True)
+        self.assertEqual(LockAlert.objects.filter(instance=instance, resolved_at__isnull=True).count(), 1)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "initial")
+        self.assertEqual(len(notify.call_args.args[1]), 1)
+
+    def test_notifies_once_while_lock_remains(self):
+        instance = make_instance()
+        now = timezone.now()
+        row = {
+            "blocked_pid": 301,
+            "blocking_pid": 401,
+            "blocked_user": "blocked_user",
+            "blocking_user": "blocking_user",
+            "blocked_query": "UPDATE orders",
+            "blocking_query": "ALTER TABLE orders",
+            "blocked_query_start": now - timedelta(seconds=180),
+            "waiting_seconds": 180,
+        }
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [row])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now)
+            process_instance(instance, now=now + timedelta(seconds=30))
+
+        self.assertEqual(notify.call_count, 1)
+
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [row])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now + timedelta(seconds=601))
+
+        self.assertEqual(notify.call_count, 0)
+
+    def test_notifies_active_update_when_lock_details_change(self):
+        instance = make_instance()
+        now = timezone.now()
+        row = {
+            "blocked_pid": 701,
+            "blocking_pid": 801,
+            "blocked_user": "app",
+            "blocking_user": "worker",
+            "blocked_query": "UPDATE orders",
+            "blocking_query": "ALTER TABLE orders",
+            "waiting_seconds": 180,
+        }
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [row])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "initial")
+
+        changed_row = {**row, "blocked_query": "UPDATE orders SET status = 'blocked'"}
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [changed_row])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now + timedelta(seconds=30))
+
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "update")
+
+    def test_summarizes_partial_clears_then_sends_one_final_clear(self):
+        instance = make_instance()
+        now = timezone.now()
+        rows = [
+            {
+                "blocked_pid": pid,
+                "blocking_pid": 900,
+                "blocked_query": f"UPDATE orders_{pid}",
+                "blocking_query": "ALTER TABLE orders",
+                "waiting_seconds": 180,
+            }
+            for pid in (901, 902, 903)
+        ]
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], rows)), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "initial")
+        self.assertEqual(len(notify.call_args.args[1]), 3)
+
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], rows[:1])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now + timedelta(seconds=30))
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "update")
+        self.assertEqual(set(notify.call_args.kwargs["cleared_keys"]), {"902:900", "903:900"})
+
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [])), \
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
+            process_instance(instance, now=now + timedelta(seconds=60))
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "cleared")
+        self.assertEqual(notify.call_args.kwargs["cleared_keys"], ["901:900"])
+
     def test_alerts_after_threshold_and_notifies_when_cleared(self):
         instance = make_instance(owner_teams_webhook_url="https://owner.example/webhook")
         now = timezone.now()
@@ -154,9 +278,10 @@ class LockMonitorTests(TestCase):
             "blocked_query": "UPDATE orders SET status = 'x'",
             "blocking_query": "ALTER TABLE orders",
             "blocked_query_start": now - timedelta(seconds=121),
+            "waiting_seconds": 121,
         }
         with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [row])), \
-             patch("monitor.management.commands.monitor_locks.notify_lock", return_value=True) as notify:
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
             alert = LockAlert.objects.create(
                 instance=instance,
                 alert_key=lock_key(row),
@@ -171,12 +296,77 @@ class LockMonitorTests(TestCase):
 
         alert.refresh_from_db()
         self.assertIsNotNone(alert.alerted_at)
-        notify.assert_called_once_with(instance, alert)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "initial")
 
         with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([], [])), \
-             patch("monitor.management.commands.monitor_locks.notify_lock", return_value=True) as notify:
+             patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
             process_instance(instance, now=now + timedelta(seconds=30))
 
         alert.refresh_from_db()
         self.assertIsNotNone(alert.resolved_at)
-        notify.assert_called_once_with(instance, alert, resolved=True)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["event"], "cleared")
+
+
+class NotificationSettingsTests(TestCase):
+    def test_notification_timestamps_are_displayed_in_ist(self):
+        value = datetime(2026, 9, 10, 5, 58, 50, tzinfo=datetime_timezone.utc)
+        self.assertEqual(_timestamp(value), "2026-09-10 11:28:50 IST")
+
+    def test_staff_can_save_notification_settings(self):
+        staff = User.objects.create_user("settings-staff", password="pw", is_staff=True)
+        self.client.login(username="settings-staff", password="pw")
+        response = self.client.post(reverse("notification-settings"), {
+            "channel_webhook_url": "https://teams.example/webhook",
+            "threshold_seconds": "180",
+            "interval_seconds": "30",
+        })
+        self.assertEqual(response.status_code, 302)
+        config = NotificationSettings.objects.get(pk=1)
+        self.assertEqual(config.channel_webhook_url, "https://teams.example/webhook")
+        self.assertEqual(config.threshold_seconds, 180)
+
+    def test_non_staff_cannot_access_notification_settings(self):
+        User.objects.create_user("settings-user", password="pw", is_staff=False)
+        self.client.login(username="settings-user", password="pw")
+        response = self.client.get(reverse("notification-settings"))
+        self.assertEqual(response.status_code, 403)
+
+    @patch("monitor.views.send_test_notification", return_value=(True, "Test notification sent."))
+    def test_staff_can_trigger_shared_channel_test(self, send_test):
+        User.objects.create_user("test-staff", password="pw", is_staff=True)
+        self.client.login(username="test-staff", password="pw")
+        NotificationSettings.objects.create(pk=1, channel_webhook_url="https://teams.example/webhook")
+        response = self.client.post(reverse("test-notification"), {
+            "destination": "shared channel",
+            "next": "notification-settings",
+        })
+        self.assertEqual(response.status_code, 302)
+        send_test.assert_called_once_with("https://teams.example/webhook", "shared channel")
+
+    def test_staff_can_update_existing_instance_owner_webhook(self):
+        staff = User.objects.create_user("webhook-staff", password="pw", is_staff=True)
+        instance = make_instance()
+        self.client.login(username="webhook-staff", password="pw")
+        response = self.client.post(reverse("instance-owner-webhook", args=[instance.pk]), {
+            "owner_teams_webhook_url": "https://owner.example/webhook",
+        })
+        self.assertEqual(response.status_code, 302)
+        instance.refresh_from_db()
+        self.assertEqual(instance.owner_teams_webhook_url, "https://owner.example/webhook")
+
+    @patch("monitor.views.send_test_notification", return_value=(True, "Test notification sent."))
+    def test_staff_can_test_existing_instance_owner_webhook(self, send_test):
+        User.objects.create_user("test-owner-webhook", password="pw", is_staff=True)
+        instance = make_instance(owner_teams_webhook_url="https://owner.example/webhook")
+        self.client.login(username="test-owner-webhook", password="pw")
+        response = self.client.post(reverse("test-notification"), {
+            "destination": "owner chat",
+            "webhook_url": instance.owner_teams_webhook_url,
+            "next": "instance-detail",
+            "instance_id": instance.pk,
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("instance-detail", args=[instance.pk]))
+        send_test.assert_called_once_with("https://owner.example/webhook", "owner chat")

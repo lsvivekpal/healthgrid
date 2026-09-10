@@ -1,0 +1,52 @@
+{% extends "monitor/base.html" %}
+{% block title %}Notification settings &middot; RDS Dashboard{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+  <a href="{% url 'instance-list' %}">All instances</a>
+  <span style="color:var(--text-faint);">/</span>
+  <span style="color:var(--text);">Notification settings</span>
+</div>
+
+<div class="card" style="max-width:680px;">
+  <div class="card-title" style="font-size:17px;">Teams lock notifications</div>
+  <p class="section-hint" style="margin:6px 0 20px;line-height:1.55;">
+    These settings are stored in the dashboard database and are read by the embedded monitor. No environment variables are required.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <label for="id_channel_webhook_url">Shared Teams channel webhook</label>
+    <input type="url" name="channel_webhook_url" id="id_channel_webhook_url" value="{{ notification_settings.channel_webhook_url }}" placeholder="https://..." autocomplete="off">
+    <div class="section-hint" style="margin-top:6px;line-height:1.45;">Configure a Teams Workflow webhook that posts to the shared alert channel.</div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px;">
+      <div>
+        <label for="id_threshold_seconds">Alert after (seconds)</label>
+        <input type="number" name="threshold_seconds" id="id_threshold_seconds" value="{{ notification_settings.threshold_seconds }}" min="1" required>
+      </div>
+      <div>
+        <label for="id_interval_seconds">Check every (seconds)</label>
+        <input type="number" name="interval_seconds" id="id_interval_seconds" value="{{ notification_settings.interval_seconds }}" min="1" required>
+      </div>
+    </div>
+    <div class="section-hint" style="margin-top:10px;line-height:1.45;">
+      Notifications are summarized per database. The first card lists active PID pairs, updates are sent only when the lock set or lock details change, and one final card is sent when all tracked locks clear. Unchanged locks do not generate heartbeat duplicates.
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-top:22px;flex-wrap:wrap;">
+      <button class="btn btn-primary" type="submit">Save settings</button>
+      <a class="btn btn-ghost" href="{% url 'instance-list' %}">Cancel</a>
+    </div>
+  </form>
+  <form method="post" action="{% url 'test-notification' %}" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="destination" value="shared channel">
+    <input type="hidden" name="next" value="notification-settings">
+    <button class="btn btn-ghost btn-sm" type="submit">Send test to shared channel</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:680px;margin-top:16px;">
+  <div class="card-title" style="font-size:14px;">Owner notifications</div>
+  <p class="section-hint" style="margin:6px 0 0;line-height:1.55;">Each database can also have its own Teams Workflow webhook. Add it from the Add instance form; the monitor posts one alert per lock incident to both the shared channel and that owner destination, then one cleared notification.</p>
+</div>
+{% endblock %}

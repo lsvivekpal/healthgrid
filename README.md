@@ -31,12 +31,15 @@ Open http://localhost:8000
 
 Lock alert monitor
 
-The Docker Compose `monitor-worker` service checks registered databases every 30 seconds. Run migrations before starting it, then configure the Teams Workflow webhook and SMTP settings in the environment:
+The web container starts the embedded lock monitor automatically. It uses a database lease so only one process checks locks when the app has multiple web workers or replicas. Run migrations before starting the app:
 
-```env
-TEAMS_LOCK_WEBHOOK_URL=https://...
-LOCK_ALERT_THRESHOLD_SECONDS=120
-LOCK_MONITOR_INTERVAL_SECONDS=30
+Open Notification settings in the dashboard to add the shared Teams channel webhook and configure the alert threshold and check interval. Add an optional owner Teams Workflow webhook for each database in the Add instance form. The embedded monitor sends one aggregate summary per database, listing active blocked-to-blocking PID pairs. It sends an update only when the lock set or lock details change, and one final summary when all tracked locks clear. For a one-time local check or troubleshooting, run `python manage.py monitor_locks --once`.
+
+For reliable emergency access, configure a separate lock-control role on each instance from the instance detail page. It should be able to inspect all sessions and terminate backends, for example (using the permissions supported by your PostgreSQL/RDS setup):
+
+```sql
+GRANT pg_monitor TO rds_dashboard_control;
+GRANT pg_signal_backend TO rds_dashboard_control;
 ```
 
-Add the shared Teams channel webhook in `TEAMS_LOCK_WEBHOOK_URL`, then add an optional owner Teams Workflow webhook for each database in the Add instance form. The worker posts the same alert to both destinations; no email is sent. It sends one alert after a lock has lasted two minutes and a resolved notification when that alerted lock disappears. For a one-time local check, run `python manage.py monitor_locks --once`; for continuous monitoring, run `python manage.py monitor_locks --interval 30`.
+The dashboard uses this control role for activity, lock, and kill operations. If it is not configured, it falls back to the regular DB username. Connections use short statement and lock timeouts so a blocked session does not make the dashboard wait indefinitely.

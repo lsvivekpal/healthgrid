@@ -46,11 +46,18 @@
     <label for="id_username">DB username</label>
     <input type="text" name="username" id="id_username" value="{{ prefill.username|default:"" }}" required placeholder="appuser">
 
+    <label for="id_control_username">Lock-control username <span class="section-hint">(optional, recommended)</span></label>
+    <input type="text" name="control_username" id="id_control_username" value="{{ prefill.control_username|default:"" }}" placeholder="db_lock_admin">
+    <div class="section-hint" style="margin-top:5px;line-height:1.45;">Use a dedicated role for monitoring and killing sessions. If blank, the DB username above is used.</div>
+
     <label for="id_owner_teams_webhook_url">Owner Teams webhook <span class="section-hint">(optional lock alerts)</span></label>
     <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ prefill.owner_teams_webhook_url|default:"" }}" placeholder="https://...">
 
     <label for="id_password">DB password</label>
     <input type="password" name="password" id="id_password" value="{{ prefill.password|default:"" }}" required>
+
+    <label for="id_control_password">Lock-control password</label>
+    <input type="password" name="control_password" id="id_control_password" placeholder="Required when lock-control username is set">
 
     <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-weight:400;color:var(--text);">
       <input type="checkbox" name="ssl_required" id="id_ssl_required" {% if prefill.ssl_required|default:True %}checked{% endif %} style="width:auto;">
@@ -74,6 +81,13 @@
       <span id="test-spinner" class="htmx-indicator"><span class="spinner"></span></span>
       <span id="test-result"></span>
     </div>
+  </form>
+  <form method="post" action="{% url 'test-notification' %}" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="destination" value="owner chat">
+    <input type="hidden" name="webhook_url" id="owner-webhook-test-url">
+    <input type="hidden" name="next" value="instance-add">
+    <button class="btn btn-ghost btn-sm" type="submit" onclick="document.getElementById('owner-webhook-test-url').value=document.getElementById('id_owner_teams_webhook_url').value;">Send test to owner chat</button>
   </form>
 </div>
 {% endblock %}

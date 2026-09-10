@@ -58,6 +58,64 @@
         </button>
       </form>
     </div>
+    <form method="post" action="{% url 'instance-owner-webhook' instance.pk %}" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
+      {% csrf_token %}
+      <div style="flex:1;min-width:280px;">
+        <label for="id_owner_teams_webhook_url" style="margin:0 0 6px;">Owner Teams webhook</label>
+        <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ instance.owner_teams_webhook_url }}" placeholder="https://..." autocomplete="off">
+      </div>
+      <button class="btn btn-ghost btn-sm" type="submit">Save owner webhook</button>
+    </form>
+    <style>
+      .control-credentials-panel { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
+      .control-credentials-heading { display:flex; align-items:center; gap:8px; margin-bottom:5px; font-size:13.5px; font-weight:700; color:var(--text); }
+      .control-credentials-grid { display:grid; grid-template-columns:minmax(220px,1fr) minmax(220px,1fr) auto; align-items:end; gap:12px; }
+      .control-credentials-field { min-width:0; }
+      .control-credentials-field label { display:block; margin:0 0 6px; }
+      .control-credentials-field input { width:100%; box-sizing:border-box; }
+      .control-credentials-actions { display:flex; align-items:end; gap:8px; height:36px; }
+      .control-credentials-test { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
+      @media (max-width: 760px) {
+        .control-credentials-grid { grid-template-columns:1fr; gap:10px; }
+        .control-credentials-actions { height:auto; align-items:stretch; }
+        .control-credentials-actions .btn { width:100%; justify-content:center; }
+      }
+    </style>
+    <div class="control-credentials-panel">
+      <div class="control-credentials-heading">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);"><path d="M12 2a5 5 0 0 0-5 5v4H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2V7a5 5 0 0 0-5-5z"/><path d="M12 16v2"/></svg>
+        Lock-control credentials
+      </div>
+      <div class="section-hint" style="margin-bottom:12px;line-height:1.45;">Used for lock monitoring and kill actions. Leave the username blank to use the regular DB username.</div>
+      <form method="post" action="{% url 'instance-control-credentials' instance.pk %}" class="control-credentials-grid">
+      {% csrf_token %}
+      <div class="control-credentials-field">
+        <label for="id_control_username">Username</label>
+        <input type="text" name="control_username" id="id_control_username" value="{{ instance.control_username }}" placeholder="db_lock_admin">
+      </div>
+      <div class="control-credentials-field">
+        <label for="id_control_password">Password</label>
+        <input type="password" name="control_password" id="id_control_password" placeholder="Required when username is set">
+      </div>
+      <div class="control-credentials-actions">
+        <button class="btn btn-ghost btn-sm" type="submit">Save credentials</button>
+      </div>
+      </form>
+    </div>
+    <form method="post" action="{% url 'instance-test-control-connection' instance.pk %}" class="control-credentials-test">
+      {% csrf_token %}
+      <button class="btn btn-ghost btn-sm" type="submit">Test lock-control connection</button>
+      <span class="section-hint">The control role needs permission to inspect sessions and terminate backends.</span>
+    </form>
+    <form method="post" action="{% url 'test-notification' %}" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      {% csrf_token %}
+      <input type="hidden" name="destination" value="owner chat">
+      <input type="hidden" name="webhook_url" value="{{ instance.owner_teams_webhook_url }}">
+      <input type="hidden" name="next" value="instance-detail">
+      <input type="hidden" name="instance_id" value="{{ instance.pk }}">
+      <button class="btn btn-ghost btn-sm" type="submit">Send test to owner chat</button>
+      <span class="section-hint">Uses the saved webhook above.</span>
+    </form>
   {% endif %}
 </div>
 

@@ -6,6 +6,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.core.validators import URLValidator
+from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -13,7 +15,8 @@ from django.views.decorators.http import require_POST
 from rest_framework import viewsets
 
 from . import db
-from .models import AuditLog, RDSInstance
+from .models import AuditLog, NotificationSettings, RDSInstance
+from .notifications import send_test_notification
 from .permissions import IsStaffOrReadOnly
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
 
@@ -96,6 +99,51 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 def instance_list(request):
     instances = RDSInstance.objects.filter(is_active=True)
     return render(request, "monitor/instance_list.html", {"instances": instances})
+
+
+@login_required
+def notification_settings(request):
+    _require_staff(request)
+    config = NotificationSettings.load()
+    if request.method == "POST":
+        webhook_url = request.POST.get("channel_webhook_url", "").strip()
+        try:
+            threshold = int(request.POST.get("threshold_seconds", "120"))
+            interval = int(request.POST.get("interval_seconds", "30"))
+        except ValueError:
+            messages.error(request, "Threshold and interval must be whole numbers.")
+        else:
+            if threshold < 1 or interval < 1:
+                messages.error(request, "Threshold and interval must be at least 1 second.")
+            else:
+                config.channel_webhook_url = webhook_url
+                config.threshold_seconds = threshold
+                config.interval_seconds = interval
+                config.save()
+                messages.success(request, "Notification settings saved.")
+                return redirect("notification-settings")
+    return render(request, "monitor/notification_settings.html", {"notification_settings": config})
+
+
+@login_required
+@require_POST
+def test_notification(request):
+    _require_staff(request)
+    destination = request.POST.get("destination", "Teams")
+    webhook_url = request.POST.get("webhook_url", "").strip()
+    if destination == "shared channel":
+        webhook_url = NotificationSettings.load().channel_webhook_url
+    ok, detail = send_test_notification(webhook_url, destination)
+    if ok:
+        messages.success(request, detail)
+    else:
+        messages.error(request, f"Test notification failed: {detail}")
+    next_page = request.POST.get("next")
+    if next_page == "notification-settings":
+        return redirect("notification-settings")
+    if next_page == "instance-detail" and request.POST.get("instance_id"):
+        return redirect("instance-detail", pk=request.POST["instance_id"])
+    return redirect("instance-add")
 
 
 @login_required
@@ -362,6 +410,14 @@ def kill_chain(request, pk):
 def add_instance(request):
     _require_staff(request)
     if request.method == "POST":
+        control_username = request.POST.get("control_username", "").strip()
+        control_password = request.POST.get("control_password", "")
+        if control_username and not control_password:
+            messages.error(request, "Lock-control password is required when a lock-control username is provided.")
+            return render(request, "monitor/add_instance.html", {"prefill": {
+                key: request.POST.get(key, "")
+                for key in ("name", "db_identifier", "region", "host", "port", "db_name", "username", "control_username", "owner_teams_webhook_url")
+            }})
         instance = RDSInstance(
             name=request.POST["name"],
             db_identifier=request.POST["db_identifier"],
@@ -370,11 +426,14 @@ def add_instance(request):
             port=request.POST.get("port") or 5432,
             db_name=request.POST["db_name"],
             username=request.POST["username"],
+            control_username=control_username,
             owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
             ssl_required=bool(request.POST.get("ssl_required")),
             added_by=request.user,
         )
         instance.set_password(request.POST["password"])
+        if control_password:
+            instance.set_control_password(control_password)
         instance.save()
         _log_audit(instance, "add_instance", request.user, detail=instance.db_identifier)
         messages.success(request, f"Added {instance.name}.")
@@ -389,6 +448,7 @@ def add_instance(request):
             "host": source.host,
             "port": source.port,
             "username": source.username,
+            "control_username": source.control_username,
             "owner_teams_webhook_url": source.owner_teams_webhook_url,
             "password": source.get_password(),
             "ssl_required": source.ssl_required,
@@ -415,6 +475,20 @@ def test_connection(request):
 
 @login_required
 @require_POST
+def test_control_connection(request, pk):
+    _require_staff(request)
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    try:
+        conn = db.get_connection(instance)
+        conn.close()
+        messages.success(request, "Lock-control connection succeeded.")
+    except db.ConnectionError as exc:
+        messages.error(request, f"Lock-control connection failed: {exc}")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
 def rename_instance(request, pk):
     _require_staff(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
@@ -428,6 +502,45 @@ def rename_instance(request, pk):
     instance.save(update_fields=["name"])
     _log_audit(instance, "rename_instance", request.user, detail=f"{old_name} -> {new_name}")
     messages.success(request, f"Renamed to {new_name}.")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def update_owner_webhook(request, pk):
+    _require_staff(request)
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    webhook_url = request.POST.get("owner_teams_webhook_url", "").strip()
+    if webhook_url:
+        try:
+            URLValidator()(webhook_url)
+        except ValidationError:
+            messages.error(request, "Enter a valid Teams webhook URL or leave the field blank.")
+            return redirect("instance-detail", pk=instance.pk)
+    instance.owner_teams_webhook_url = webhook_url
+    instance.save(update_fields=["owner_teams_webhook_url"])
+    messages.success(request, "Owner Teams webhook saved.")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def update_control_credentials(request, pk):
+    _require_staff(request)
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    control_username = request.POST.get("control_username", "").strip()
+    control_password = request.POST.get("control_password", "")
+    if control_username and not control_password:
+        messages.error(request, "Enter the lock-control password, or clear the username to use the DB username.")
+        return redirect("instance-detail", pk=instance.pk)
+
+    instance.control_username = control_username
+    if control_username:
+        instance.set_control_password(control_password)
+    else:
+        instance.control_password_encrypted = ""
+    instance.save(update_fields=["control_username", "control_password_encrypted"])
+    messages.success(request, "Lock-control credentials saved. Monitoring and kill actions will use them immediately.")
     return redirect("instance-detail", pk=instance.pk)
 
 

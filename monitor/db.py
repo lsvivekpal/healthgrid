@@ -6,6 +6,9 @@ import psycopg2.extras
 logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_SECONDS = 5
+STATEMENT_TIMEOUT_MILLISECONDS = 8000
+LOCK_TIMEOUT_MILLISECONDS = 2000
+IDLE_TRANSACTION_TIMEOUT_MILLISECONDS = 10000
 
 # Active queries plus idle-in-transaction sessions (the #1 real-world lock cause) —
 # plain idle connections doing nothing are excluded as noise.
@@ -99,16 +102,29 @@ class ConnectionError(Exception):
 
 
 def get_connection(instance):
-    """Open a short-lived psycopg2 connection to the target RDS instance."""
+    """Open an independent control connection to the target RDS instance.
+
+    A dedicated control role can be configured for monitoring and termination.
+    It prevents a blocked application role from taking the dashboard's
+    emergency path down with it.
+    """
+    username = instance.control_username or instance.username
+    password = instance.get_control_password() if instance.control_username else instance.get_password()
     try:
         return psycopg2.connect(
             host=instance.host,
             port=instance.port,
             dbname=instance.db_name,
-            user=instance.username,
-            password=instance.get_password(),
+            user=username,
+            password=password,
             connect_timeout=CONNECT_TIMEOUT_SECONDS,
             sslmode="require" if instance.ssl_required else "prefer",
+            application_name="rds-dashboard-control",
+            options=(
+                f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS} "
+                f"-c lock_timeout={LOCK_TIMEOUT_MILLISECONDS} "
+                f"-c idle_in_transaction_session_timeout={IDLE_TRANSACTION_TIMEOUT_MILLISECONDS}"
+            ),
         )
     except Exception as exc:
         raise ConnectionError(str(exc)) from exc
@@ -244,6 +260,12 @@ def test_connection(host, port, db_name, username, password, ssl_required):
             password=password,
             connect_timeout=CONNECT_TIMEOUT_SECONDS,
             sslmode="require" if ssl_required else "prefer",
+            application_name="rds-dashboard-test",
+            options=(
+                f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS} "
+                f"-c lock_timeout={LOCK_TIMEOUT_MILLISECONDS} "
+                f"-c idle_in_transaction_session_timeout={IDLE_TRANSACTION_TIMEOUT_MILLISECONDS}"
+            ),
         )
         conn.close()
         return True, None
