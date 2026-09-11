@@ -18,15 +18,21 @@
       <div><label for="id_username">Username</label><input type="text" name="username" id="id_username" required autocomplete="username"></div>
       <div><label for="id_email">Email (optional)</label><input type="email" name="email" id="id_email" autocomplete="email"></div>
       <div><label for="id_password">Temporary password</label><input type="password" name="password" id="id_password" required autocomplete="new-password"></div>
-      <div><label for="id_role">Access</label><select name="role" id="id_role"><option value="readonly">Read-only</option><option value="operator">Operator</option></select></div>
+      <div><label for="id_role">Access</label><select name="role" id="id_role" onchange="syncSlotGrantInputs()"><option value="readonly">Read-only</option><option value="operator">Operator</option></select></div>
     </div>
+    <fieldset id="new-slot-grants" disabled style="margin:18px 0 0;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);">
+      <legend style="font-size:13px;font-weight:600;">Optional operator replication permissions</legend>
+      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="can_terminate_slots" value="1">Terminate slot backend</label>
+      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="can_drop_slots" value="1">Drop slot (MFA required)</label>
+      <p class="section-hint" style="margin:8px 0 0;">Disabled by default. These independent grants apply to all instances. Read-only accounts cannot receive them.</p>
+    </fieldset>
     <button class="btn btn-primary" type="submit" style="margin-top:16px;">Create user</button>
   </form>
 </div>
 
-<div class="card table-scroll settings-card" style="max-width:780px;padding:0;margin-top:16px;">
+<div class="card table-scroll settings-card" style="max-width:1040px;padding:0;margin-top:16px;">
   <table class="responsive-table">
-    <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th></tr></thead>
+    <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th><th>Replication permissions</th></tr></thead>
     <tbody>
       {% for account in users %}
       <tr>
@@ -35,9 +41,33 @@
         <td data-label="Role">{% if account.is_superuser %}Administrator{% elif account.is_staff %}Operator{% else %}Read-only{% endif %}</td>
         <td data-label="Status">{% if account.is_active %}<span class="badge badge-ok">active</span>{% else %}<span class="badge badge-muted">disabled</span>{% endif %}</td>
         <td data-label="MFA">{% if account.mfa_profile.enabled %}<span class="badge badge-ok">enabled</span>{% else %}<span class="badge badge-warn">pending</span>{% endif %}</td>
+        <td data-label="Replication permissions">
+          {% if account.is_superuser %}
+            <span class="badge badge-ok">Full access</span>
+          {% elif account.is_staff %}
+            <form method="post" style="display:grid;gap:8px;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="update_slot_access">
+              <input type="hidden" name="user_id" value="{{ account.pk }}">
+              <label for="terminate-slot-{{ account.pk }}" style="display:flex;align-items:center;gap:8px;margin:0;font-size:12px;"><input id="terminate-slot-{{ account.pk }}" type="checkbox" name="can_terminate_slots" value="1" {% if account.replication_slot_access.can_terminate %}checked{% endif %}>Terminate slot backend</label>
+              <label for="drop-slot-{{ account.pk }}" style="display:flex;align-items:center;gap:8px;margin:0;font-size:12px;"><input id="drop-slot-{{ account.pk }}" type="checkbox" name="can_drop_slots" value="1" {% if account.replication_slot_access.can_drop %}checked{% endif %}>Drop slot (MFA)</label>
+              <button class="btn btn-ghost btn-sm" type="submit" aria-label="Save replication permissions for {{ account.username }}">Save permissions</button>
+            </form>
+          {% else %}
+            <span class="section-hint">View only</span>
+          {% endif %}
+        </td>
       </tr>
-      {% empty %}<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-faint);">No users found.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-faint);">No users found.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
+<script>
+  function syncSlotGrantInputs() {
+    var grants = document.getElementById('new-slot-grants');
+    grants.disabled = document.getElementById('id_role').value !== 'operator';
+    if (grants.disabled) grants.querySelectorAll('input').forEach(function (input) { input.checked = false; });
+  }
+  syncSlotGrantInputs();
+</script>
 {% endblock %}

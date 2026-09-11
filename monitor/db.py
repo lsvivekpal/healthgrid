@@ -173,28 +173,39 @@ def fetch_activity_with_vitals(instance):
         conn.close()
 
 
-def kill_pid(instance, pid):
-    """Terminate a backend on the target instance. Returns True if it was running."""
+# Check slot membership in the same statement as termination. Generic PID and
+# bulk/lock-chain routes must not bypass the operator's slot-termination grant.
+GUARDED_TERMINATE_QUERY = """
+SELECT CASE
+    WHEN %s OR NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE active_pid = %s)
+    THEN pg_terminate_backend(%s)
+    ELSE FALSE
+END;
+"""
+
+
+def kill_pid(instance, pid, *, allow_replication=False):
+    """Terminate a backend; protected replication-slot PIDs return False."""
     conn = get_connection(instance)
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute("SELECT pg_terminate_backend(%s);", (pid,))
+            cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid))
             (terminated,) = cur.fetchone()
         return bool(terminated)
     finally:
         conn.close()
 
 
-def kill_pids(instance, pids):
-    """Terminate multiple backends over one connection. Returns {pid: terminated_bool}."""
+def kill_pids(instance, pids, *, allow_replication=False):
+    """Terminate permitted backends; return False for missing/protected PIDs."""
     conn = get_connection(instance)
     results = {}
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
             for pid in pids:
-                cur.execute("SELECT pg_terminate_backend(%s);", (pid,))
+                cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid))
                 (terminated,) = cur.fetchone()
                 results[pid] = bool(terminated)
         return results

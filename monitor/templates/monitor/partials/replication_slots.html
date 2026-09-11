@@ -19,7 +19,7 @@
     <div class="table-scroll">
     <table class="responsive-table" style="margin-top:8px;">
       <thead>
-        <tr><th>Slot</th><th>Type</th><th>Plugin</th><th>Database</th><th>Status</th><th>Retained WAL</th>{% if is_staff %}<th></th>{% endif %}</tr>
+        <tr><th>Slot</th><th>Type</th><th>Plugin</th><th>Database</th><th>Status</th><th>Retained WAL</th>{% if can_drop_slots or can_terminate_slots %}<th>Actions</th>{% endif %}</tr>
       </thead>
       <tbody>
         {% for slot in slots %}
@@ -36,10 +36,10 @@
             {% endif %}
           </td>
           <td data-label="Retained WAL">{{ slot.retained_wal|default:"—" }}</td>
-          {% if is_staff %}
+          {% if can_drop_slots or can_terminate_slots %}
           <td>
             <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
-              {% if slot.active %}
+              {% if slot.active and can_terminate_slots %}
               <form class="inline" method="post" action="{% url 'instance-kill-replication-slot' instance.pk %}"
                     onsubmit="return confirmKill(event, 'Terminate the active backend for replication slot &quot;{{ slot.slot_name }}&quot; on {{ instance.name }}? Its consumer will need to reconnect.');">
                 {% csrf_token %}
@@ -47,7 +47,7 @@
                 <button class="btn btn-muted btn-sm" type="submit">Terminate backend</button>
               </form>
               {% endif %}
-              {% if user.is_superuser %}
+              {% if can_drop_slots %}
               <form class="inline" method="post" action="{% url 'instance-drop-replication-slot' instance.pk %}" data-requires-mfa="true"
                     onsubmit="return confirmKill(event, 'Permanently DROP replication slot &quot;{{ slot.slot_name }}&quot; on {{ instance.name }}? Any consumer using it will need to fully resync. This cannot be undone.{% if slot.active %} It is currently active — dropping will fail until its backend is terminated.{% endif %}');">
                 {% csrf_token %}
@@ -55,8 +55,6 @@
                 <input type="hidden" name="slot_name" value="{{ slot.slot_name }}">
                 <button class="btn btn-danger btn-sm" type="submit">Drop slot</button>
               </form>
-              {% else %}
-              <span class="section-hint">Administrator required to drop slots</span>
               {% endif %}
             </div>
           </td>

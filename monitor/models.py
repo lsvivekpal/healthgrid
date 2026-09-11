@@ -67,6 +67,7 @@ class AuditLog(models.Model):
         ("add_instance", "Add instance"),
         ("remove_instance", "Remove instance"),
         ("rename_instance", "Rename instance"),
+        ("update_slot_permissions", "Update replication-slot permissions"),
     ]
 
     instance = models.ForeignKey(
@@ -186,6 +187,14 @@ class NotificationSettings(models.Model):
 
     def __str__(self):
         return "Notification settings"
+
+
+class ReplicationSlotAccess(models.Model):
+    """Explicit operator grants; absence of a row means neither action is allowed."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="replication_slot_access")
+    can_drop = models.BooleanField(default=False)
+    can_terminate = models.BooleanField(default=False)
 
 
 class UserMFA(models.Model):

@@ -13,6 +13,7 @@ from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -22,9 +23,9 @@ from rest_framework.exceptions import PermissionDenied as APIPermissionDenied
 
 from . import db
 from .mfa import require_mfa_for_action
-from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance
+from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance, ReplicationSlotAccess
 from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
-from .permissions import IsStaffOrReadOnly
+from .permissions import IsStaffOrReadOnly, can_manage_replication_slot
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,19 @@ def _require_staff(request):
 def _require_administrator(request):
     if not (request.user.is_active and request.user.is_staff and request.user.is_superuser):
         raise PermissionDenied("Administrator permission required for this action.")
+
+
+def _require_slot_permission(request, action):
+    if not can_manage_replication_slot(request.user, action):
+        raise PermissionDenied(f"Administrator access or an explicit operator grant is required to {action} replication slots.")
+
+
+def _save_slot_access(request, user, can_drop, can_terminate):
+    ReplicationSlotAccess.objects.update_or_create(
+        user=user, defaults={"can_drop": can_drop, "can_terminate": can_terminate},
+    )
+    _log_audit(None, "update_slot_permissions", request.user,
+               detail=f"user={user.username} (id={user.pk}); drop={can_drop}; terminate={can_terminate}")
 
 
 def _fmt_duration(seconds):
@@ -226,17 +240,35 @@ def notification_settings(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def user_management(request):
-    """Superuser-only account creation with an explicit operator/read-only role."""
-    if not request.user.is_superuser:
-        raise PermissionDenied("Administrator permission required for user management.")
+    """Administrator-only account creation and per-operator slot grants."""
+    _require_administrator(request)
     User = get_user_model()
     if request.method == "POST":
+        can_drop = request.POST.get("can_drop_slots") == "1"
+        can_terminate = request.POST.get("can_terminate_slots") == "1"
+        action = request.POST.get("action", "create_user")
+        if action == "update_slot_access":
+            try:
+                target_id = int(request.POST.get("user_id", ""))
+            except (TypeError, ValueError):
+                raise PermissionDenied("A valid operator account is required.")
+            with transaction.atomic():
+                target = get_object_or_404(User.objects.select_for_update(), pk=target_id)
+                if target.is_superuser or not target.is_staff:
+                    raise PermissionDenied("Replication-slot grants can only be changed for operators.")
+                _save_slot_access(request, target, can_drop, can_terminate)
+            messages.success(request, f"Updated replication-slot permissions for '{target.username}'.")
+            return redirect("user-management")
+        if action != "create_user":
+            raise PermissionDenied("Unknown user-management action.")
         username = request.POST.get("username", "").strip()
         email = request.POST.get("email", "").strip()
         password = request.POST.get("password", "")
         role = request.POST.get("role", "readonly")
         if not username or not password or role not in {"operator", "readonly"}:
             messages.error(request, "Username, password, and a valid role are required.")
+        elif role != "operator" and (can_drop or can_terminate):
+            messages.error(request, "Only operators can be granted replication-slot permissions.")
         elif User.objects.filter(username=username).exists():
             messages.error(request, "That username already exists.")
         else:
@@ -245,12 +277,13 @@ def user_management(request):
             except ValidationError as exc:
                 messages.error(request, " ".join(exc.messages))
             else:
-                user = User.objects.create_user(username=username, email=email, password=password)
-                user.is_staff = role == "operator"
-                user.save(update_fields=["is_staff"])
+                with transaction.atomic():
+                    user = User.objects.create_user(username=username, email=email, password=password, is_staff=role == "operator")
+                    if role == "operator" and (can_drop or can_terminate):
+                        _save_slot_access(request, user, can_drop, can_terminate)
                 messages.success(request, f"Created {role} user '{username}'. They will enroll their own authenticator on first login.")
                 return redirect("user-management")
-    return render(request, "monitor/user_management.html", {"users": User.objects.order_by("username")})
+    return render(request, "monitor/user_management.html", {"users": User.objects.select_related("replication_slot_access", "mfa_profile").order_by("username")})
 
 
 @login_required
@@ -380,7 +413,9 @@ def replication_slots_partial(request, pk):
     return render(
         request,
         "monitor/partials/replication_slots.html",
-        {"instance": instance, "slots": slots, "error": error, "is_staff": request.user.is_staff},
+        {"instance": instance, "slots": slots, "error": error,
+         "can_drop_slots": can_manage_replication_slot(request.user, "drop"),
+         "can_terminate_slots": can_manage_replication_slot(request.user, "terminate")},
     )
 
 
@@ -388,8 +423,8 @@ def replication_slots_partial(request, pk):
 @require_POST
 def kill_replication_slot(request, pk):
     """Terminate the walsender backend behind a slot — a prerequisite for dropping it."""
+    _require_slot_permission(request, "terminate")
     instance = get_object_or_404(RDSInstance, pk=pk)
-    _require_staff(request)
     slot_name = request.POST.get("slot_name", "")
 
     try:
@@ -416,7 +451,7 @@ def kill_replication_slot(request, pk):
 def drop_replication_slot(request, pk):
     """Drop a replication slot entirely. Irreversible — any consumer attached to
     it will need to resync from scratch. Fails if the slot is still active."""
-    _require_administrator(request)
+    _require_slot_permission(request, "drop")
     instance = get_object_or_404(RDSInstance, pk=pk)
     slot_name = request.POST.get("slot_name", "")
     if not _require_action_mfa(request, instance, "drop_replication_slot", detail=slot_name, require_code=True):
@@ -532,18 +567,21 @@ def _kill_session_impl(request, pk, *, lock_only=False):
         return redirect("instance-detail", pk=instance.pk)
 
     try:
-        terminated = db.kill_pid(instance, pid)
+        if can_manage_replication_slot(request.user, "terminate"):
+            terminated = db.kill_pid(instance, pid, allow_replication=True)
+        else:
+            terminated = db.kill_pid(instance, pid)
         _log_audit(
             instance, "kill_session", request.user,
             pid=pid, query=query_snapshot,
             result="success" if terminated else "failed",
-            detail="" if terminated else "pid was not running",
+            detail="" if terminated else "pid was not running or is a protected replication-slot backend",
         )
         if terminated:
             _mark_manual_kill(instance, [pid], request.user)
             messages.success(request, f"Terminated backend pid {pid}.")
         else:
-            messages.warning(request, f"pid {pid} was not running.")
+            messages.warning(request, f"pid {pid} was not running or is a replication-slot backend you do not have permission to terminate.")
     except db.ConnectionError as exc:
         _log_audit(instance, "kill_session", request.user, pid=pid, query=query_snapshot, result="failed", detail=str(exc))
         messages.error(request, f"Could not connect to kill pid {pid}: {exc}")
@@ -594,7 +632,10 @@ def _kill_chain_impl(request, pk, *, lock_only=False, require_mfa=False):
             return redirect("instance-detail", pk=instance.pk)
 
     try:
-        results = db.kill_pids(instance, pids)
+        if can_manage_replication_slot(request.user, "terminate"):
+            results = db.kill_pids(instance, pids, allow_replication=True)
+        else:
+            results = db.kill_pids(instance, pids)
         terminated = [pid for pid, ok in results.items() if ok]
         not_running = [pid for pid, ok in results.items() if not ok]
         _log_audit(
@@ -607,7 +648,7 @@ def _kill_chain_impl(request, pk, *, lock_only=False, require_mfa=False):
             _mark_manual_kill(instance, terminated, request.user)
             messages.success(request, f"Terminated {len(terminated)} pid(s): {terminated}.")
         if not_running:
-            messages.warning(request, f"Already gone: {not_running}.")
+            messages.warning(request, f"Not running or protected replication-slot backends: {not_running}.")
     except db.ConnectionError as exc:
         _log_audit(instance, "kill_chain", request.user, query=query_snapshot, result="failed", detail=str(exc))
         messages.error(request, f"Could not connect to kill chain: {exc}")
