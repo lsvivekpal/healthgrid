@@ -80,6 +80,15 @@ MFA is required for every dashboard login, with a separate authenticator enrollm
 
 Superusers can open User management to create Operator or Read-only accounts. Read-only users can view the dashboard and export data but cannot kill sessions, change instances, edit notification settings, or access mutation endpoints. The built-in `/admin/` entry is also routed through dashboard MFA.
 
+Removing an instance and dropping a replication slot are restricted to active
+superusers (the **Administrator** role). Both require an authenticator or recovery
+code submitted for that action, even immediately after MFA login. Operators can
+still use their existing lock-control actions, but cannot remove instances or
+drop slots. Instance removal through the REST API requires an Administrator
+session and a JSON `mfa_code` field in the DELETE body. Instance deletion in
+Django admin, including bulk deletion, is disabled; use the dashboard's MFA
+confirmation instead. No database migration is needed for these restrictions.
+
 Notification schedule
 
 Notification settings can restrict lock-alert delivery to a custom IST window, such as 09:00–21:00. Lock checks and database state tracking continue outside the window, but Teams lock alerts are suppressed; persistent locks receive a fresh summary when the window opens. Weekly reports remain independent and are not suppressed by this setting. Overnight windows such as 21:00–09:00 are supported.

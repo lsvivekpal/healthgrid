@@ -9,6 +9,11 @@ class RDSInstanceAdmin(admin.ModelAdmin):
     list_filter = ("region", "is_active")
     search_fields = ("name", "db_identifier", "host")
 
+    def has_delete_permission(self, request, obj=None):
+        # Deletion must use the dashboard/API action with per-action MFA,
+        # including for superusers. This also removes admin bulk deletion.
+        return False
+
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):

@@ -113,8 +113,10 @@ def has_recent_session_verification(request):
     return 0 <= timezone.now().timestamp() - verified_at <= MFA_STEP_UP_MAX_AGE_SECONDS
 
 
-def require_mfa_for_action(request, code=""):
-    """Accept a recent login MFA or validate a code supplied for this action."""
+def require_mfa_for_action(request, code="", *, require_code=False):
+    """Validate an action code; optionally allow recent login MFA as fallback."""
+    if not isinstance(code, str):
+        return False
     try:
         profile = request.user.mfa_profile
     except UserMFA.DoesNotExist:
@@ -127,4 +129,4 @@ def require_mfa_for_action(request, code=""):
             return False
         mark_session_verified(request)
         return True
-    return has_recent_session_verification(request)
+    return not require_code and has_recent_session_verification(request)

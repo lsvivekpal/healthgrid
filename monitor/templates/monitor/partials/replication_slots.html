@@ -47,6 +47,7 @@
                 <button class="btn btn-muted btn-sm" type="submit">Terminate backend</button>
               </form>
               {% endif %}
+              {% if user.is_superuser %}
               <form class="inline" method="post" action="{% url 'instance-drop-replication-slot' instance.pk %}" data-requires-mfa="true"
                     onsubmit="return confirmKill(event, 'Permanently DROP replication slot &quot;{{ slot.slot_name }}&quot; on {{ instance.name }}? Any consumer using it will need to fully resync. This cannot be undone.{% if slot.active %} It is currently active — dropping will fail until its backend is terminated.{% endif %}');">
                 {% csrf_token %}
@@ -54,6 +55,9 @@
                 <input type="hidden" name="slot_name" value="{{ slot.slot_name }}">
                 <button class="btn btn-danger btn-sm" type="submit">Drop slot</button>
               </form>
+              {% else %}
+              <span class="section-hint">Administrator required to drop slots</span>
+              {% endif %}
             </div>
           </td>
           {% endif %}

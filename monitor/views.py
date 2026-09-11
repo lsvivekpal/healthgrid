@@ -18,6 +18,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_http_methods
 from rest_framework import viewsets
+from rest_framework.exceptions import PermissionDenied as APIPermissionDenied
 
 from . import db
 from .mfa import require_mfa_for_action
@@ -32,6 +33,11 @@ logger = logging.getLogger(__name__)
 def _require_staff(request):
     if not request.user.is_staff:
         raise PermissionDenied("Staff permission required for this action.")
+
+
+def _require_administrator(request):
+    if not (request.user.is_active and request.user.is_staff and request.user.is_superuser):
+        raise PermissionDenied("Administrator permission required for this action.")
 
 
 def _fmt_duration(seconds):
@@ -83,8 +89,8 @@ def _mark_manual_kill(instance, pids, user):
     ).update(clear_reason="manual_kill", cleared_by=user.get_username())
 
 
-def _require_action_mfa(request, instance, action, detail=""):
-    if require_mfa_for_action(request, request.POST.get("mfa_code", "")):
+def _require_action_mfa(request, instance, action, detail="", *, require_code=False):
+    if require_mfa_for_action(request, request.POST.get("mfa_code", ""), require_code=require_code):
         return True
     _log_audit(
         instance,
@@ -110,6 +116,10 @@ class RDSInstanceViewSet(viewsets.ModelViewSet):
         _log_audit(instance, "add_instance", self.request.user)
 
     def perform_destroy(self, instance):
+        _require_administrator(self.request)
+        if not require_mfa_for_action(self.request, self.request.data.get("mfa_code", ""), require_code=True):
+            _log_audit(instance, "remove_instance", self.request.user, result="failed", detail="MFA verification required")
+            raise APIPermissionDenied("A valid authenticator or recovery code is required to remove an instance.")
         _log_audit(instance, "remove_instance", self.request.user, detail=instance.db_identifier)
         instance.delete()
 
@@ -406,10 +416,10 @@ def kill_replication_slot(request, pk):
 def drop_replication_slot(request, pk):
     """Drop a replication slot entirely. Irreversible — any consumer attached to
     it will need to resync from scratch. Fails if the slot is still active."""
+    _require_administrator(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
-    _require_staff(request)
     slot_name = request.POST.get("slot_name", "")
-    if not _require_action_mfa(request, instance, "drop_replication_slot", detail=slot_name):
+    if not _require_action_mfa(request, instance, "drop_replication_slot", detail=slot_name, require_code=True):
         return redirect("instance-detail", pk=instance.pk)
 
     try:
@@ -762,8 +772,10 @@ def update_control_credentials(request, pk):
 @login_required
 @require_POST
 def remove_instance(request, pk):
-    _require_staff(request)
+    _require_administrator(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
+    if not _require_action_mfa(request, instance, "remove_instance", detail=instance.db_identifier, require_code=True):
+        return redirect("instance-detail", pk=instance.pk)
     _log_audit(instance, "remove_instance", request.user, detail=instance.db_identifier)
     instance.delete()
     messages.success(request, "Instance removed.")
