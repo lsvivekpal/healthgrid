@@ -29,6 +29,28 @@ Build Docker image:
 
 Open http://localhost:8000
 
+### Production CSS and static files
+
+The Docker build runs `collectstatic`. WhiteNoise serves those collected files
+from the web application with `DJANGO_DEBUG=false`, including the responsive UI
+and Django admin styles. Stylesheet URLs include a content hash so each UI build
+gets a new browser-cache key. Keep debugging disabled in production.
+
+After UI changes, rebuild and publish the image, then replace the running service
+with that image. Do not mount an old directory over `/app/staticfiles` (or over
+the entire `/app` directory) in production. If a reverse proxy has a separate
+`/static/` rule, either forward that path to the web application or update its
+files from the same image; otherwise it can still return stale files or a 404.
+
+To verify a deployment, open the page's stylesheet URL (for example
+`/static/monitor/responsive.<hash>.css`) in the browser Network panel. It must
+return HTTP 200 with `Content-Type: text/css`, not a login page or HTML error.
+No database migration is needed for static-file changes.
+
+For checks outside a freshly built image, run `python manage.py collectstatic
+--noinput` before `python manage.py test monitor`. The production static-file
+tests explicitly disable development static serving.
+
 Lock alert monitor
 
 The web container starts the embedded lock monitor automatically. It uses a database lease so only one process checks locks when the app has multiple web workers or replicas. Run migrations before starting the app:
