@@ -1,3 +1,5 @@
+from datetime import time
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -142,6 +144,21 @@ class NotificationSettings(models.Model):
     channel_webhook_url = models.URLField(max_length=2048, blank=True, help_text="Shared Teams channel Workflow webhook")
     threshold_seconds = models.PositiveIntegerField(default=120)
     interval_seconds = models.PositiveIntegerField(default=30)
+    notification_schedule_enabled = models.BooleanField(
+        default=False,
+        help_text="Only send lock notifications during the configured IST window",
+    )
+    notification_start_time = models.TimeField(default=time(9, 0))
+    notification_end_time = models.TimeField(default=time(21, 0))
+    manual_query_alert_enabled = models.BooleanField(
+        default=False,
+        help_text="Alert when non-excluded users run active queries beyond the threshold",
+    )
+    manual_query_threshold_seconds = models.PositiveIntegerField(default=60)
+    manual_query_excluded_users = models.TextField(
+        default="applms,applos",
+        help_text="Comma-separated database usernames excluded from long-query alerts",
+    )
     weekly_report_enabled = models.BooleanField(default=False)
     weekly_report_day = models.PositiveSmallIntegerField(default=0, help_text="0=Monday through 6=Sunday")
     weekly_report_hour = models.PositiveSmallIntegerField(default=9, help_text="Hour in IST, 0-23")
@@ -169,6 +186,71 @@ class NotificationSettings(models.Model):
 
     def __str__(self):
         return "Notification settings"
+
+
+class UserMFA(models.Model):
+    """Encrypted TOTP enrollment and hashed recovery codes for a dashboard user."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mfa_profile")
+    secret_encrypted = models.CharField(max_length=512, blank=True)
+    backup_codes = models.JSONField(default=list)
+    pending_backup_codes_encrypted = models.CharField(max_length=2048, blank=True)
+    enabled = models.BooleanField(default=False)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User MFA"
+        verbose_name_plural = "User MFA"
+
+    def set_secret(self, secret):
+        self.secret_encrypted = crypto.encrypt_password(secret)
+
+    def get_secret(self):
+        return crypto.decrypt_password(self.secret_encrypted)
+
+    def set_pending_backup_codes(self, codes):
+        self.pending_backup_codes_encrypted = crypto.encrypt_password("\n".join(codes))
+
+    def get_pending_backup_codes(self):
+        if not self.pending_backup_codes_encrypted:
+            return []
+        return crypto.decrypt_password(self.pending_backup_codes_encrypted).splitlines()
+
+
+class LongQueryAlert(models.Model):
+    """One tracked long-running query execution for manual-query notifications."""
+
+    instance = models.ForeignKey(RDSInstance, on_delete=models.CASCADE, related_name="long_query_alerts")
+    alert_key = models.CharField(max_length=255)
+    pid = models.IntegerField()
+    username = models.CharField(max_length=255, blank=True)
+    application_name = models.CharField(max_length=255, blank=True)
+    client_addr = models.CharField(max_length=255, blank=True)
+    query = models.TextField(blank=True)
+    query_start = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField(default=0)
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    alerted_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["instance", "resolved_at"]),
+            models.Index(fields=["alert_key"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["instance", "alert_key"],
+                condition=Q(resolved_at__isnull=True),
+                name="unique_active_long_query_alert",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.instance.name}: {self.username} pid {self.pid}"
 
 
 class LockReport(models.Model):

@@ -1,0 +1,43 @@
+{% extends "monitor/base.html" %}
+{% block title %}Users · RDS Dashboard{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+  <a href="{% url 'instance-list' %}">All instances</a><span style="color:var(--text-faint);">/</span><span style="color:var(--text);">Users</span>
+</div>
+<div class="card" style="max-width:780px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Dashboard users</div>
+      <div class="section-hint" style="margin-top:5px;line-height:1.45;">Each user enrolls a separate Google Authenticator device. Read-only users can view the dashboard but cannot kill sessions, change instances, or edit notifications.</div>
+    </div>
+    <span class="badge badge-ok">administrator</span>
+  </div>
+  <form method="post" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border);">
+    {% csrf_token %}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+      <div><label for="id_username">Username</label><input type="text" name="username" id="id_username" required autocomplete="username"></div>
+      <div><label for="id_email">Email (optional)</label><input type="email" name="email" id="id_email" autocomplete="email"></div>
+      <div><label for="id_password">Temporary password</label><input type="password" name="password" id="id_password" required autocomplete="new-password"></div>
+      <div><label for="id_role">Access</label><select name="role" id="id_role"><option value="readonly">Read-only</option><option value="operator">Operator</option></select></div>
+    </div>
+    <button class="btn btn-primary" type="submit" style="margin-top:16px;">Create user</button>
+  </form>
+</div>
+
+<div class="card table-scroll" style="max-width:780px;padding:0;margin-top:16px;">
+  <table class="responsive-table">
+    <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th></tr></thead>
+    <tbody>
+      {% for account in users %}
+      <tr>
+        <td data-label="Username"><strong>{{ account.username }}</strong></td>
+        <td data-label="Email">{{ account.email|default:"—" }}</td>
+        <td data-label="Role">{% if account.is_superuser %}Administrator{% elif account.is_staff %}Operator{% else %}Read-only{% endif %}</td>
+        <td data-label="Status">{% if account.is_active %}<span class="badge badge-ok">active</span>{% else %}<span class="badge badge-muted">disabled</span>{% endif %}</td>
+        <td data-label="MFA">{% if account.mfa_profile.enabled %}<span class="badge badge-ok">enabled</span>{% else %}<span class="badge badge-warn">pending</span>{% endif %}</td>
+      </tr>
+      {% empty %}<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-faint);">No users found.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

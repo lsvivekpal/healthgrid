@@ -28,12 +28,50 @@
         <input type="number" name="interval_seconds" id="id_interval_seconds" value="{{ notification_settings.interval_seconds }}" min="1" required>
       </div>
     </div>
+    <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px;">
+      <label style="display:flex;align-items:center;gap:8px;margin:0;">
+        <input type="checkbox" name="notification_schedule_enabled" value="1" {% if notification_settings.notification_schedule_enabled %}checked{% endif %}>
+        Send lock notifications only during the schedule
+      </label>
+      <div class="section-hint" style="margin-top:6px;line-height:1.45;">Times are IST. Outside this window, lock checks continue and active locks remain available in the weekly report; a surviving lock gets a fresh summary when the window opens.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:12px;max-width:440px;">
+        <div>
+          <label for="id_notification_start_time">Enable notifications from</label>
+          <input type="time" name="notification_start_time" id="id_notification_start_time" value="{{ notification_settings.notification_start_time|time:'H:i' }}" required>
+        </div>
+        <div>
+          <label for="id_notification_end_time">Disable notifications at</label>
+          <input type="time" name="notification_end_time" id="id_notification_end_time" value="{{ notification_settings.notification_end_time|time:'H:i' }}" required>
+        </div>
+      </div>
+      <div class="section-hint" style="margin-top:6px;line-height:1.45;">Overnight windows are supported too, for example 21:00 to 09:00. The weekly report is not suppressed by this setting.</div>
+    </div>
     <div style="margin-top:12px;max-width:260px;">
       <label for="id_resolved_alert_retention_days">Keep resolved lock records (days)</label>
       <input type="number" name="resolved_alert_retention_days" id="id_resolved_alert_retention_days" value="{{ notification_settings.resolved_alert_retention_days }}" min="7" max="3650" required>
     </div>
     <div class="section-hint" style="margin-top:10px;line-height:1.45;">
       Notifications are summarized per database. The first card lists active PID pairs, updates are sent only when the lock set or lock details change, and one final card is sent when all tracked locks clear. Unchanged locks do not generate heartbeat duplicates. Active locks are never removed; resolved records are cleaned daily after the retention period.
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">
+      <div class="card-title" style="font-size:14px;">Long-running manual queries</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+        <input type="checkbox" name="manual_query_alert_enabled" value="1" {% if notification_settings.manual_query_alert_enabled %}checked{% endif %}>
+        Alert on long-running manual queries
+      </label>
+      <div class="section-hint" style="margin-top:6px;line-height:1.45;">Checks active queries from tools such as DBeaver or TablePlus. Each PID/query execution is notified once after the threshold; it will not repeat while unchanged. Query changes or a new execution create a new alert.</div>
+      <div style="display:grid;grid-template-columns:minmax(180px,220px) 1fr;gap:12px;margin-top:12px;align-items:end;">
+        <div>
+          <label for="id_manual_query_threshold_seconds">Alert after (seconds)</label>
+          <input type="number" name="manual_query_threshold_seconds" id="id_manual_query_threshold_seconds" value="{{ notification_settings.manual_query_threshold_seconds }}" min="1" required>
+        </div>
+        <div>
+          <label for="id_manual_query_excluded_users">Excluded database users</label>
+          <input type="text" name="manual_query_excluded_users" id="id_manual_query_excluded_users" value="{{ notification_settings.manual_query_excluded_users }}" placeholder="applms, applos" autocomplete="off">
+        </div>
+      </div>
+      <div class="section-hint" style="margin-top:6px;line-height:1.45;">Use comma-separated PostgreSQL usernames for application accounts. The dashboard control connection is always excluded automatically.</div>
     </div>
 
     <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">

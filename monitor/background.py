@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from . import db
 from .management.commands.monitor_locks import process_instance
-from .models import LockAlert, LockReport, MonitorLease, NotificationSettings, RDSInstance
+from .models import LockAlert, LockReport, LongQueryAlert, MonitorLease, NotificationSettings, RDSInstance
 from .notifications import DISPLAY_TIMEZONE, send_weekly_reports
 
 
@@ -77,10 +77,14 @@ def cleanup_monitor_history(now=None):
             resolved_at__isnull=False,
             resolved_at__lt=alert_cutoff,
         ).delete()
+        deleted_long_queries, _details = LongQueryAlert.objects.filter(
+            resolved_at__isnull=False,
+            resolved_at__lt=alert_cutoff,
+        ).delete()
         deleted_reports, _details = LockReport.objects.filter(expires_at__lt=now).delete()
         config.last_cleanup_at = now
         config.save(update_fields=["last_cleanup_at", "updated_at"])
-    return deleted_alerts, deleted_reports
+    return deleted_alerts + deleted_long_queries, deleted_reports
 
 
 def monitor_loop():

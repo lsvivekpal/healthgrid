@@ -13,7 +13,7 @@ IDLE_TRANSACTION_TIMEOUT_MILLISECONDS = 10000
 # Active queries plus idle-in-transaction sessions (the #1 real-world lock cause) —
 # plain idle connections doing nothing are excluded as noise.
 ACTIVITY_QUERY = """
-    SELECT pid, usename, application_name, client_addr, state,
+    SELECT pid, usename, application_name, client_addr, backend_type, state,
            wait_event_type, wait_event, query, query_start,
            EXTRACT(EPOCH FROM (now() - query_start))::int AS duration_seconds
     FROM pg_stat_activity

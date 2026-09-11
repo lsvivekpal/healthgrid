@@ -201,11 +201,11 @@
     /* ---- Forms ---------------------------------------------------------- */
     form.inline { display: inline; }
     label { display: block; margin: 14px 0 6px; font-weight: 600; font-size: 12.5px; color: var(--text); }
-    input[type=text], input[type=number], input[type=password] {
+    input[type=text], input[type=number], input[type=password], input[type=email], input[type=time], select {
       width: 100%; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
       background: var(--surface); color: var(--text); font-family: inherit; font-size: 14px; transition: border-color 120ms ease, box-shadow 120ms ease;
     }
-    input[type=text]:focus, input[type=number]:focus, input[type=password]:focus {
+    input[type=text]:focus, input[type=number]:focus, input[type=password]:focus, input[type=email]:focus, input[type=time]:focus, select:focus {
       outline: none; border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-ring);
     }
     input::placeholder { color: var(--text-faint); }
@@ -299,7 +299,9 @@
     <div class="toolbar">
       <button type="button" id="theme-toggle" class="icon-action" title="Toggle day/night mode" onclick="toggleTheme()"></button>
       {% if user.is_authenticated %}
+      <a class="icon-action" href="{% url 'mfa-setup' %}" title="Authenticator security" aria-label="Authenticator security">✦</a>
       {% if user.is_staff %}<a class="icon-action" href="{% url 'notification-settings' %}" title="Notification settings" aria-label="Notification settings">⚙</a>{% endif %}
+      {% if user.is_superuser %}<a class="icon-action" href="{% url 'user-management' %}" title="User management" aria-label="User management">♙</a>{% endif %}
       <div class="user-chip">
         <span class="avatar">{{ user.username|first }}</span>
         <span>{{ user.username }}</span>
@@ -374,6 +376,18 @@
     function confirmKill(evt, message) {
       evt.preventDefault();
       var form = evt.target;
+      if (form.dataset && form.dataset.requiresMfa === 'true') {
+        var mfaCode = window.prompt('MFA required. Enter your 6-digit Google Authenticator code (or a recovery code):');
+        if (mfaCode === null || !mfaCode.trim()) return false;
+        var mfaField = form.querySelector('input[name="mfa_code"]');
+        if (!mfaField) {
+          mfaField = document.createElement('input');
+          mfaField.type = 'hidden';
+          mfaField.name = 'mfa_code';
+          form.appendChild(mfaField);
+        }
+        mfaField.value = mfaCode.trim();
+      }
       var backdrop = document.getElementById('confirm-modal');
       document.getElementById('confirm-modal-message').textContent = message;
       backdrop.classList.add('open');

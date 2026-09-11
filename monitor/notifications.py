@@ -20,6 +20,21 @@ REPORT_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 MAX_INLINE_REPORT_BYTES = 20 * 1024
 
 
+def lock_notifications_open(config, now=None):
+    """Return whether lock alerts may be delivered in the configured IST window."""
+    if not config.notification_schedule_enabled:
+        return True
+    local_time = timezone.localtime(now or timezone.now(), DISPLAY_TIMEZONE).time()
+    start = config.notification_start_time
+    end = config.notification_end_time
+    if start == end:
+        return True
+    if start < end:
+        return start <= local_time < end
+    # Support an intentional overnight window, e.g. 21:00–09:00.
+    return local_time >= start or local_time < end
+
+
 def _short_query(query, limit=600):
     query = " ".join(str(query or "").split())
     return query if len(query) <= limit else query[: limit - 1] + "…"
@@ -389,4 +404,86 @@ def notify_lock_summary(instance, alerts, *, event, previous_active_keys, cleare
     if not webhook_urls:
         logger.warning("No Teams webhook is configured; skipping Teams alert")
 
+    return delivered
+
+
+def _long_query_card(instance, alerts, sent_at):
+    items = [
+        {
+            "type": "Container",
+            "style": "attention",
+            "bleed": True,
+            "items": [
+                {"type": "TextBlock", "text": "RDS Dashboard", "weight": "Bolder", "size": "Small", "color": "Attention"},
+                {"type": "TextBlock", "text": "Long-running manual query detected", "weight": "Bolder", "size": "Large", "color": "Attention", "spacing": "None"},
+            ],
+        },
+        {
+            "type": "TextBlock",
+            "text": f"{len(alerts)} query execution(s) exceeded the configured runtime threshold. Review the user and query before terminating anything.",
+            "wrap": True,
+            "weight": "Bolder",
+            "spacing": "Medium",
+        },
+        {
+            "type": "FactSet",
+            "facts": [
+                {"title": "Database", "value": str(instance)},
+                {"title": "Region", "value": instance.region},
+                {"title": "Detected at", "value": _timestamp(sent_at)},
+            ],
+        },
+    ]
+    for alert in list(alerts)[:20]:
+        items.append({
+            "type": "Container",
+            "style": "emphasis",
+            "spacing": "Medium",
+            "items": [
+                {"type": "TextBlock", "text": f"PID {alert.pid} · user {alert.username or '—'}", "weight": "Bolder", "size": "Medium"},
+                {"type": "FactSet", "facts": [
+                    {"title": "Runtime", "value": _human_duration(alert.duration_seconds)},
+                    {"title": "Application", "value": alert.application_name or "—"},
+                    {"title": "Client", "value": alert.client_addr or "local"},
+                    {"title": "Query started", "value": _timestamp(alert.query_start)},
+                ]},
+                {"type": "TextBlock", "text": _short_query(alert.query, limit=3000), "wrap": True, "fontType": "Monospace", "size": "Small", "spacing": "Small"},
+            ],
+        })
+    if len(alerts) > 20:
+        items.append({"type": "TextBlock", "text": f"Showing 20 of {len(alerts)} queries. Use the dashboard Sessions view for the complete list.", "wrap": True, "size": "Small", "color": "Warning"})
+    return {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": items,
+        "actions": [],
+    }
+
+
+def notify_long_query(instance, alerts, *, sent_at):
+    """Send one card for newly detected long manual queries to both destinations."""
+    if not alerts:
+        return False
+    card = _long_query_card(instance, alerts, sent_at)
+    delivered = False
+    webhook_urls = list(dict.fromkeys(filter(None, [
+        NotificationSettings.load().channel_webhook_url,
+        instance.owner_teams_webhook_url,
+    ])))
+    for webhook_url in webhook_urls:
+        try:
+            if _post_webhook(webhook_url, {
+                # Keep the existing Power Automate lock-alert branch compatible.
+                "event_type": "lock_alert",
+                "alert_type": "long_query",
+                "card": card,
+            }):
+                delivered = True
+            else:
+                logger.error("Teams webhook returned a non-success HTTP status")
+        except Exception:
+            logger.exception("Could not send long-query notification for %s", instance)
+    if not webhook_urls:
+        logger.warning("No Teams webhook is configured; skipping long-query alert")
     return delivered

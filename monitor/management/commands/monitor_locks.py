@@ -7,8 +7,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from monitor import db
-from monitor.models import LockAlert, LockNotificationState, NotificationSettings, RDSInstance
-from monitor.notifications import notify_lock_summary
+from monitor.models import LockAlert, LockNotificationState, LongQueryAlert, NotificationSettings, RDSInstance
+from monitor.notifications import lock_notifications_open, notify_lock_summary, notify_long_query
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,77 @@ def summary_fingerprint(alerts):
         for alert in alerts
     )
     return hashlib.sha256("\0".join(values).encode("utf-8")).hexdigest()
+
+
+def long_query_key(row):
+    values = (
+        row.get("pid"),
+        row.get("usename") or "",
+        row.get("query_start") or "",
+        row.get("query") or "",
+    )
+    fingerprint = hashlib.sha256("\0".join(str(value) for value in values).encode("utf-8")).hexdigest()
+    return f"{row.get('pid')}:{fingerprint}"
+
+
+def process_long_queries(instance, activity, config, now):
+    """Track and notify once for long active queries from non-application users."""
+    if not config.manual_query_alert_enabled:
+        LongQueryAlert.objects.filter(instance=instance, resolved_at__isnull=True).update(resolved_at=now)
+        return
+
+    excluded_users = {
+        username.strip().casefold()
+        for username in (config.manual_query_excluded_users or "").split(",")
+        if username.strip()
+    }
+    candidates = {}
+    for row in activity:
+        username = str(row.get("usename") or "").strip()
+        application_name = str(row.get("application_name") or "").strip()
+        if row.get("state") != "active" or not username or username.casefold() in excluded_users:
+            continue
+        if application_name.casefold() == "rds-dashboard-control":
+            continue
+        if int(row.get("duration_seconds") or 0) < config.manual_query_threshold_seconds:
+            continue
+        candidates[long_query_key(row)] = row
+
+    seen_keys = set(candidates)
+    new_alerts = []
+    for key, row in candidates.items():
+        with transaction.atomic():
+            alert, created = LongQueryAlert.objects.select_for_update().get_or_create(
+                instance=instance,
+                alert_key=key,
+                resolved_at=None,
+                defaults={
+                    "pid": row["pid"],
+                    "username": row.get("usename") or "",
+                    "application_name": row.get("application_name") or "",
+                    "client_addr": str(row.get("client_addr") or ""),
+                    "query": row.get("query") or "",
+                    "query_start": row.get("query_start"),
+                    "duration_seconds": max(0, int(row.get("duration_seconds") or 0)),
+                    "first_seen_at": now,
+                    "last_seen_at": now,
+                },
+            )
+            if not created:
+                alert.last_seen_at = now
+                alert.duration_seconds = max(0, int(row.get("duration_seconds") or alert.duration_seconds))
+                alert.save(update_fields=["last_seen_at", "duration_seconds"])
+            if alert.alerted_at is None:
+                new_alerts.append(alert)
+
+    LongQueryAlert.objects.filter(
+        instance=instance,
+        resolved_at__isnull=True,
+    ).exclude(alert_key__in=seen_keys).update(resolved_at=now)
+
+    if new_alerts and lock_notifications_open(config, now):
+        if notify_long_query(instance, new_alerts, sent_at=now):
+            LongQueryAlert.objects.filter(pk__in=[alert.pk for alert in new_alerts]).update(alerted_at=now)
 
 
 def process_instance(instance, now=None):
@@ -124,11 +195,22 @@ def process_instance(instance, now=None):
     )
     current_keys = sorted(alert.alert_key for alert in eligible_alerts)
 
+    process_long_queries(instance, activity, config, now)
+
     with transaction.atomic():
         state, _created = LockNotificationState.objects.select_for_update().get_or_create(instance=instance)
         previous_keys = sorted(state.last_active_keys or [])
         cleared_keys = sorted(set(previous_keys) - set(current_keys))
         current_fingerprint = summary_fingerprint(eligible_alerts)
+
+        if not lock_notifications_open(config, now):
+            # Keep the current set for the next daytime comparison, but clear
+            # the fingerprint so a lock that survives the quiet window gets a
+            # fresh daytime summary instead of being treated as unchanged.
+            state.last_fingerprint = ""
+            state.last_active_keys = current_keys
+            state.save(update_fields=["last_fingerprint", "last_active_keys"])
+            return
 
         if current_fingerprint == state.last_fingerprint:
             return

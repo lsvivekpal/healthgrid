@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .auth_views import mfa_setup
 from . import views
 
 router = DefaultRouter()
@@ -16,6 +17,8 @@ urlpatterns = [
     path("settings/notifications/", views.notification_settings, name="notification-settings"),
     path("settings/notifications/test/", views.test_notification, name="test-notification"),
     path("settings/notifications/weekly-report/", views.send_weekly_report_now, name="send-weekly-report-now"),
+    path("settings/users/", views.user_management, name="user-management"),
+    path("settings/security/mfa/", mfa_setup, name="mfa-setup"),
     path("reports/weekly/<str:token>/", views.download_weekly_report, name="download-weekly-report"),
     path("instances/<int:pk>/", views.instance_detail, name="instance-detail"),
     path("instances/<int:pk>/card/", views.instance_card_partial, name="instance-card"),
@@ -25,6 +28,8 @@ urlpatterns = [
     path("instances/<int:pk>/replication-slots/drop/", views.drop_replication_slot, name="instance-drop-replication-slot"),
     path("instances/<int:pk>/locks/download/", views.download_locks, name="instance-locks-download"),
     path("instances/<int:pk>/sessions/download/", views.download_sessions, name="instance-sessions-download"),
+    path("instances/<int:pk>/locks/kill/", views.kill_lock_session, name="instance-kill-lock"),
+    path("instances/<int:pk>/locks/kill-chain/", views.kill_lock_chain, name="instance-kill-lock-chain"),
     path("instances/<int:pk>/kill/", views.kill_session, name="instance-kill"),
     path("instances/<int:pk>/kill-chain/", views.kill_chain, name="instance-kill-chain"),
     path("instances/<int:pk>/rename/", views.rename_instance, name="instance-rename"),

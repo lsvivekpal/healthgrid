@@ -1,7 +1,10 @@
 import csv
 import logging
+from datetime import datetime
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
@@ -13,10 +16,11 @@ from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
 from rest_framework import viewsets
 
 from . import db
+from .mfa import require_mfa_for_action
 from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance
 from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
 from .permissions import IsStaffOrReadOnly
@@ -77,6 +81,20 @@ def _mark_manual_kill(instance, pids, user):
     ).filter(
         Q(blocked_pid__in=pids) | Q(blocking_pid__in=pids)
     ).update(clear_reason="manual_kill", cleared_by=user.get_username())
+
+
+def _require_action_mfa(request, instance, action, detail=""):
+    if require_mfa_for_action(request, request.POST.get("mfa_code", "")):
+        return True
+    _log_audit(
+        instance,
+        action,
+        request.user,
+        result="failed",
+        detail=f"MFA verification required{': ' + detail if detail else ''}",
+    )
+    messages.error(request, "MFA verification is required for this action. Set up Google Authenticator from the security menu, then try again.")
+    return False
 
 
 # --- DRF API: instance registry CRUD ---
@@ -147,8 +165,20 @@ def notification_settings(request):
             report_day = int(request.POST.get("weekly_report_day", "0"))
             report_hour = int(request.POST.get("weekly_report_hour", "9"))
             retention_days = int(request.POST.get("resolved_alert_retention_days", "30"))
+            schedule_enabled = bool(request.POST.get("notification_schedule_enabled"))
+            schedule_start = datetime.strptime(request.POST.get("notification_start_time", "09:00"), "%H:%M").time()
+            schedule_end = datetime.strptime(request.POST.get("notification_end_time", "21:00"), "%H:%M").time()
+            manual_query_enabled = bool(request.POST.get("manual_query_alert_enabled"))
+            manual_query_threshold = int(request.POST.get("manual_query_threshold_seconds", "60"))
+            manual_query_excluded_users = ",".join(
+                sorted({
+                    username.strip()
+                    for username in request.POST.get("manual_query_excluded_users", "").split(",")
+                    if username.strip()
+                }, key=str.casefold)
+            )
         except ValueError:
-            messages.error(request, "Threshold, interval, report schedule, and retention must be whole numbers.")
+            messages.error(request, "Enter valid numeric values and notification times in HH:MM format.")
         else:
             if (
                 threshold < 1
@@ -157,12 +187,21 @@ def notification_settings(request):
                 or report_hour not in range(24)
                 or retention_days < 7
                 or retention_days > 3650
+                or (schedule_enabled and schedule_start == schedule_end)
+                or manual_query_threshold < 1
+                or len(manual_query_excluded_users) > 4000
             ):
-                messages.error(request, "Use positive threshold/interval values, a valid report schedule, and retention from 7 to 3650 days.")
+                messages.error(request, "Use positive thresholds, different notification start/end times, a valid report schedule, retention from 7 to 3650 days, and a valid excluded-user list.")
             else:
                 config.channel_webhook_url = webhook_url
                 config.threshold_seconds = threshold
                 config.interval_seconds = interval
+                config.notification_schedule_enabled = schedule_enabled
+                config.notification_start_time = schedule_start
+                config.notification_end_time = schedule_end
+                config.manual_query_alert_enabled = manual_query_enabled
+                config.manual_query_threshold_seconds = manual_query_threshold
+                config.manual_query_excluded_users = manual_query_excluded_users
                 config.weekly_report_enabled = bool(request.POST.get("weekly_report_enabled"))
                 config.weekly_report_day = report_day
                 config.weekly_report_hour = report_hour
@@ -172,6 +211,36 @@ def notification_settings(request):
                 messages.success(request, "Notification settings saved.")
                 return redirect("notification-settings")
     return render(request, "monitor/notification_settings.html", {"notification_settings": config})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def user_management(request):
+    """Superuser-only account creation with an explicit operator/read-only role."""
+    if not request.user.is_superuser:
+        raise PermissionDenied("Administrator permission required for user management.")
+    User = get_user_model()
+    if request.method == "POST":
+        username = request.POST.get("username", "").strip()
+        email = request.POST.get("email", "").strip()
+        password = request.POST.get("password", "")
+        role = request.POST.get("role", "readonly")
+        if not username or not password or role not in {"operator", "readonly"}:
+            messages.error(request, "Username, password, and a valid role are required.")
+        elif User.objects.filter(username=username).exists():
+            messages.error(request, "That username already exists.")
+        else:
+            try:
+                validate_password(password)
+            except ValidationError as exc:
+                messages.error(request, " ".join(exc.messages))
+            else:
+                user = User.objects.create_user(username=username, email=email, password=password)
+                user.is_staff = role == "operator"
+                user.save(update_fields=["is_staff"])
+                messages.success(request, f"Created {role} user '{username}'. They will enroll their own authenticator on first login.")
+                return redirect("user-management")
+    return render(request, "monitor/user_management.html", {"users": User.objects.order_by("username")})
 
 
 @login_required
@@ -340,6 +409,8 @@ def drop_replication_slot(request, pk):
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_staff(request)
     slot_name = request.POST.get("slot_name", "")
+    if not _require_action_mfa(request, instance, "drop_replication_slot", detail=slot_name):
+        return redirect("instance-detail", pk=instance.pk)
 
     try:
         ok, error = db.drop_replication_slot(instance, slot_name)
@@ -418,14 +489,37 @@ def download_sessions(request, pk):
     return response
 
 
-@login_required
-@require_POST
-def kill_session(request, pk):
+def _current_lock_pids(instance):
+    """Return PIDs currently involved in a lock, for the no-MFA lock route."""
+    _activity, blocking = db.fetch_activity(instance)
+    return {
+        pid
+        for row in blocking
+        for pid in (row.get("blocked_pid"), row.get("blocking_pid"))
+        if pid is not None
+    }
+
+
+def _kill_session_impl(request, pk, *, lock_only=False):
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_staff(request)
 
-    pid = int(request.POST["pid"])
+    try:
+        pid = int(request.POST["pid"])
+    except (KeyError, TypeError, ValueError):
+        messages.error(request, "A valid backend PID is required.")
+        return redirect("instance-detail", pk=instance.pk)
     query_snapshot = request.POST.get("query", "")
+    if lock_only:
+        try:
+            if pid not in _current_lock_pids(instance):
+                messages.error(request, f"pid {pid} is no longer part of an active lock.")
+                return redirect("instance-detail", pk=instance.pk)
+        except db.ConnectionError as exc:
+            messages.error(request, f"Could not verify the lock before killing pid {pid}: {exc}")
+            return redirect("instance-detail", pk=instance.pk)
+    elif not _require_action_mfa(request, instance, "kill_session", detail=f"pid={pid}"):
+        return redirect("instance-detail", pk=instance.pk)
 
     try:
         terminated = db.kill_pid(instance, pid)
@@ -450,14 +544,44 @@ def kill_session(request, pk):
 
 @login_required
 @require_POST
-def kill_chain(request, pk):
-    """Kill every pid in a blocking chain (blocked + blocking) in one action."""
+def kill_session(request, pk):
+    """Kill a live session; MFA is required for this route."""
+    return _kill_session_impl(request, pk, lock_only=False)
+
+
+@login_required
+@require_POST
+def kill_lock_session(request, pk):
+    """Kill a PID currently involved in a lock; this is the MFA-free lock action."""
+    return _kill_session_impl(request, pk, lock_only=True)
+
+
+def _kill_chain_impl(request, pk, *, lock_only=False, require_mfa=False):
+    """Kill selected PIDs, with an optional validated lock scope."""
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_staff(request)
 
-    pids = [int(p) for p in request.POST.getlist("pid")]
+    try:
+        pids = [int(p) for p in request.POST.getlist("pid")]
+    except (TypeError, ValueError):
+        messages.error(request, "The selected backend PIDs are invalid.")
+        return redirect("instance-detail", pk=instance.pk)
     query_snapshot = request.POST.get("query", "")
     action = "kill_chain" if request.POST.get("mode") == "chain" else "bulk_kill"
+    if not pids:
+        messages.error(request, "Select at least one backend PID first.")
+        return redirect("instance-detail", pk=instance.pk)
+    if require_mfa and not _require_action_mfa(request, instance, action, detail=f"pids={pids}"):
+        return redirect("instance-detail", pk=instance.pk)
+    if lock_only:
+        try:
+            lock_pids = _current_lock_pids(instance)
+            if not set(pids).issubset(lock_pids):
+                messages.error(request, "One or more selected PIDs are no longer part of an active lock.")
+                return redirect("instance-detail", pk=instance.pk)
+        except db.ConnectionError as exc:
+            messages.error(request, f"Could not verify the lock before killing the selected PIDs: {exc}")
+            return redirect("instance-detail", pk=instance.pk)
 
     try:
         results = db.kill_pids(instance, pids)
@@ -480,6 +604,18 @@ def kill_chain(request, pk):
 
     cache.delete(f"activity:{instance.pk}")
     return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def kill_chain(request, pk):
+    return _kill_chain_impl(request, pk, lock_only=False, require_mfa=True)
+
+
+@login_required
+@require_POST
+def kill_lock_chain(request, pk):
+    return _kill_chain_impl(request, pk, lock_only=True, require_mfa=True)
 
 
 @login_required

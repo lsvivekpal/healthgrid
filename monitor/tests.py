@@ -1,16 +1,18 @@
 from unittest.mock import patch
 
+import pyotp
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
-from datetime import datetime, timedelta, timezone as datetime_timezone
+from datetime import datetime, time, timedelta, timezone as datetime_timezone
 
 from . import db
-from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance
+from .models import AuditLog, LockAlert, LockReport, LongQueryAlert, NotificationSettings, RDSInstance, UserMFA
 from .background import cleanup_monitor_history
+from .mfa import confirm_enrollment, new_enrollment
 from .management.commands.monitor_locks import lock_key, process_instance
-from .notifications import _adaptive_card, _summary_message, _timestamp, send_weekly_reports
+from .notifications import _adaptive_card, _summary_message, _timestamp, lock_notifications_open, send_weekly_reports
 
 User = get_user_model()
 
@@ -127,9 +129,10 @@ class KillSessionPermissionTests(TestCase):
             first_seen_at=timezone.now(),
             last_seen_at=timezone.now(),
         )
-        with patch.object(db, "kill_pid", return_value=True) as mock_kill:
+        with patch.object(db, "fetch_activity", return_value=([], [{"blocked_pid": 555, "blocking_pid": 777}])), \
+             patch.object(db, "kill_pid", return_value=True) as mock_kill:
             resp = self.client.post(
-                reverse("instance-kill", args=[self.instance.pk]),
+                reverse("instance-kill-lock", args=[self.instance.pk]),
                 {"pid": 555, "query": "SELECT 1"},
             )
         mock_kill.assert_called_once_with(self.instance, 555)
@@ -169,6 +172,68 @@ class AddInstanceAuditTests(TestCase):
         instance = RDSInstance.objects.get(db_identifier="new-db")
         log = AuditLog.objects.get(action="add_instance", instance=instance)
         self.assertEqual(log.performed_by, staff)
+
+
+class MFASecurityTests(TestCase):
+    def setUp(self):
+        self.instance = make_instance()
+        self.staff = User.objects.create_user("mfa-staffer", password="pw", is_staff=True)
+
+    def enroll(self):
+        profile = UserMFA.objects.create(user=self.staff)
+        secret, _codes = new_enrollment(profile)
+        self.assertTrue(confirm_enrollment(profile, pyotp.TOTP(secret).now()))
+        return profile, secret
+
+    def test_unenrolled_staff_is_sent_to_setup(self):
+        response = self.client.post(reverse("login"), {"username": "mfa-staffer", "password": "pw"})
+        self.assertRedirects(response, reverse("mfa-setup"), fetch_redirect_response=False)
+        self.assertTrue(response.wsgi_request.user.is_authenticated)
+        setup = self.client.get(reverse("mfa-setup"))
+        self.assertEqual(setup.status_code, 200)
+        self.assertContains(setup, "Authenticator enrollment QR code")
+
+    def test_enabled_staff_login_requires_authenticator_code(self):
+        _profile, secret = self.enroll()
+        response = self.client.post(reverse("login"), {"username": "mfa-staffer", "password": "pw"})
+        self.assertRedirects(response, reverse("mfa-verify"), fetch_redirect_response=False)
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+
+        response = self.client.post(reverse("mfa-verify"), {"code": pyotp.TOTP(secret).now()})
+        self.assertRedirects(response, reverse("instance-list"), fetch_redirect_response=False)
+        self.assertTrue(response.wsgi_request.user.is_authenticated)
+
+    def test_live_session_kill_requires_mfa(self):
+        self.client.login(username="mfa-staffer", password="pw")
+        with patch.object(db, "kill_pid") as mock_kill:
+            response = self.client.post(reverse("instance-kill", args=[self.instance.pk]), {"pid": 321})
+        self.assertRedirects(response, reverse("instance-detail", args=[self.instance.pk]), fetch_redirect_response=False)
+        mock_kill.assert_not_called()
+        self.assertEqual(AuditLog.objects.get(action="kill_session").result, "failed")
+
+    def test_lock_kill_route_does_not_require_mfa(self):
+        self.client.login(username="mfa-staffer", password="pw")
+        with patch.object(db, "fetch_activity", return_value=([], [{"blocked_pid": 321, "blocking_pid": 654}])), \
+             patch.object(db, "kill_pid", return_value=True) as mock_kill:
+            response = self.client.post(reverse("instance-kill-lock", args=[self.instance.pk]), {"pid": 321})
+        self.assertEqual(response.status_code, 302)
+        mock_kill.assert_called_once_with(self.instance, 321)
+
+    def test_lock_bulk_kill_requires_mfa(self):
+        _profile, secret = self.enroll()
+        self.client.login(username="mfa-staffer", password="pw")
+        payload = {"pid": [321, 654], "mode": "bulk"}
+        with patch.object(db, "kill_pids") as mock_kill:
+            response = self.client.post(reverse("instance-kill-lock-chain", args=[self.instance.pk]), payload)
+        self.assertEqual(response.status_code, 302)
+        mock_kill.assert_not_called()
+
+        payload["mfa_code"] = pyotp.TOTP(secret).now()
+        with patch.object(db, "fetch_activity", return_value=([], [{"blocked_pid": 321, "blocking_pid": 654}])), \
+             patch.object(db, "kill_pids", return_value={321: True, 654: True}) as mock_kill:
+            response = self.client.post(reverse("instance-kill-lock-chain", args=[self.instance.pk]), payload)
+        self.assertEqual(response.status_code, 302)
+        mock_kill.assert_called_once_with(self.instance, [321, 654])
 
 
 class LockMonitorTests(TestCase):
@@ -321,6 +386,47 @@ class LockMonitorTests(TestCase):
         self.assertEqual(notify.call_args.kwargs["event"], "cleared")
 
 
+class LongQueryMonitorTests(TestCase):
+    def test_notifies_new_long_manual_query_once_and_excludes_application_users(self):
+        instance = make_instance()
+        now = timezone.now()
+        NotificationSettings.objects.create(
+            pk=1,
+            manual_query_alert_enabled=True,
+            manual_query_threshold_seconds=60,
+            manual_query_excluded_users="applms,applos",
+        )
+        query_start = now - timedelta(seconds=75)
+        row = {
+            "pid": 7001,
+            "usename": "dbeaver_user",
+            "application_name": "DBeaver",
+            "client_addr": "10.0.0.5",
+            "state": "active",
+            "query": "UPDATE ledger SET status = 'x'",
+            "query_start": query_start,
+            "duration_seconds": 75,
+        }
+        excluded = {**row, "pid": 7002, "usename": "applms", "duration_seconds": 120}
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([row, excluded], [])), \
+             patch("monitor.management.commands.monitor_locks.notify_long_query", return_value=True) as notify:
+            process_instance(instance, now=now)
+            process_instance(instance, now=now + timedelta(seconds=30))
+
+        self.assertEqual(LongQueryAlert.objects.filter(instance=instance).count(), 1)
+        self.assertEqual(notify.call_count, 1)
+        self.assertEqual(notify.call_args.args[0], instance)
+        self.assertEqual(notify.call_args.args[1][0].username, "dbeaver_user")
+
+        changed = {**row, "query": "DELETE FROM ledger WHERE id = 1", "query_start": now + timedelta(seconds=30), "duration_seconds": 61}
+        with patch("monitor.management.commands.monitor_locks.db.fetch_activity", return_value=([changed], [])), \
+             patch("monitor.management.commands.monitor_locks.notify_long_query", return_value=True) as notify:
+            process_instance(instance, now=now + timedelta(seconds=91))
+
+        self.assertEqual(LongQueryAlert.objects.filter(instance=instance, resolved_at__isnull=True).count(), 1)
+        self.assertEqual(notify.call_count, 1)
+
+
 class NotificationSettingsTests(TestCase):
     def test_notification_timestamps_are_displayed_in_ist(self):
         value = datetime(2026, 9, 10, 5, 58, 50, tzinfo=datetime_timezone.utc)
@@ -371,6 +477,36 @@ class NotificationSettingsTests(TestCase):
         self.assertEqual(config.weekly_report_hour, 10)
         self.assertEqual(config.report_base_url, "https://dashboard.example.com")
         self.assertEqual(config.resolved_alert_retention_days, 45)
+
+    def test_staff_can_save_custom_notification_window(self):
+        staff = User.objects.create_user("schedule-staff", password="pw", is_staff=True)
+        self.client.login(username="schedule-staff", password="pw")
+        response = self.client.post(reverse("notification-settings"), {
+            "threshold_seconds": "120",
+            "interval_seconds": "30",
+            "notification_schedule_enabled": "1",
+            "notification_start_time": "09:00",
+            "notification_end_time": "21:00",
+            "resolved_alert_retention_days": "30",
+        })
+        self.assertEqual(response.status_code, 302)
+        config = NotificationSettings.objects.get(pk=1)
+        self.assertTrue(config.notification_schedule_enabled)
+        self.assertEqual(config.notification_start_time.isoformat(), "09:00:00")
+        self.assertEqual(config.notification_end_time.isoformat(), "21:00:00")
+
+    def test_notification_window_uses_ist_and_supports_quiet_hours(self):
+        config = NotificationSettings.objects.create(
+            pk=1,
+            notification_schedule_enabled=True,
+            notification_start_time=time(9, 0),
+            notification_end_time=time(21, 0),
+        )
+        morning = datetime(2026, 9, 11, 3, 30, tzinfo=datetime_timezone.utc)  # 09:00 IST
+        night = datetime(2026, 9, 11, 16, 0, tzinfo=datetime_timezone.utc)  # 21:30 IST
+        self.assertTrue(lock_notifications_open(config, morning))
+        self.assertFalse(lock_notifications_open(config, night))
+
 
     def test_cleanup_removes_only_old_resolved_alerts_and_expired_reports(self):
         instance = make_instance()
@@ -518,3 +654,18 @@ class NotificationSettingsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("instance-detail", args=[instance.pk]))
         send_test.assert_called_once_with("https://owner.example/webhook", "owner chat")
+
+
+class UserManagementTests(TestCase):
+    def test_superuser_can_create_read_only_user(self):
+        User.objects.create_superuser("root-admin", "root@example.com", "Strong-password-1")
+        self.client.login(username="root-admin", password="Strong-password-1")
+        response = self.client.post(reverse("user-management"), {
+            "username": "viewer",
+            "email": "viewer@example.com",
+            "password": "Strong-password-2",
+            "role": "readonly",
+        })
+        self.assertEqual(response.status_code, 302)
+        viewer = User.objects.get(username="viewer")
+        self.assertFalse(viewer.is_staff)

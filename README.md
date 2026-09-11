@@ -49,3 +49,15 @@ GRANT pg_signal_backend TO rds_dashboard_control;
 ```
 
 The dashboard uses this control role for activity, lock, and kill operations. If it is not configured, it falls back to the regular DB username. Connections use short statement and lock timeouts so a blocked session does not make the dashboard wait indefinitely.
+
+Staff MFA
+
+Staff accounts use Google Authenticator-compatible TOTP MFA. After deploying the MFA migration, each staff member signs in with their password and is sent to `MFA security` to scan the QR code and save the one-time recovery codes. Once enabled, MFA is required at staff login.
+
+MFA is required for every dashboard login, with a separate authenticator enrollment and recovery codes per user. It is also required for live-session kills, all bulk/chain kills (including lock bulk/chain actions), and dropping replication slots. Only an individual lock kill is MFA-free; its dedicated route validates that the selected PID is currently part of an active lock. Keep `DJANGO_SECRET_KEY` and `ENCRYPTION_KEY` stable and secret in production; the TOTP secret is encrypted with `ENCRYPTION_KEY` and recovery codes are stored as hashes.
+
+Superusers can open User management to create Operator or Read-only accounts. Read-only users can view the dashboard and export data but cannot kill sessions, change instances, edit notification settings, or access mutation endpoints. The built-in `/admin/` entry is also routed through dashboard MFA.
+
+Notification schedule
+
+Notification settings can restrict lock-alert delivery to a custom IST window, such as 09:00–21:00. Lock checks and database state tracking continue outside the window, but Teams lock alerts are suppressed; persistent locks receive a fresh summary when the window opens. Weekly reports remain independent and are not suppressed by this setting. Overnight windows such as 21:00–09:00 are supported.

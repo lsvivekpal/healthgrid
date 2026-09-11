@@ -93,7 +93,7 @@
         <input type="text" placeholder="Filter locks…" oninput="filterTable(this, 'locks-table')" style="padding-left:30px;font-size:13px;">
       </div>
       {% if is_staff %}
-      <form id="locks-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
+      <form id="locks-bulk-form" method="post" action="{% url 'instance-kill-lock-chain' instance.pk %}" data-requires-mfa="true"
             onsubmit="var n=document.querySelectorAll('input[name=pid][form=\'locks-bulk-form\']:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
         {% csrf_token %}
         <input type="hidden" name="mode" value="bulk">
@@ -131,21 +131,21 @@
             <td>
               {% if is_staff %}
               <div id="lock-actions-{{ forloop.counter0 }}" style="display:none;flex-direction:column;gap:4px;align-items:flex-start;">
-                <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
+                <form class="inline" method="post" action="{% url 'instance-kill-lock' instance.pk %}"
                       onsubmit="return confirmKill(event, 'Terminate backend pid {{ row.blocking_pid }} (the blocking query) on {{ instance.name }}? This cannot be undone.');">
                   {% csrf_token %}
                   <input type="hidden" name="pid" value="{{ row.blocking_pid }}">
                   <input type="hidden" name="query" value="{{ row.blocking_query|truncatechars:500 }}">
                   <button class="btn btn-danger btn-sm" type="submit">Kill blocking ({{ row.blocking_pid }})</button>
                 </form>
-                <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
+                <form class="inline" method="post" action="{% url 'instance-kill-lock' instance.pk %}"
                       onsubmit="return confirmKill(event, 'Terminate backend pid {{ row.blocked_pid }} (the blocked query) on {{ instance.name }}? This cannot be undone.');">
                   {% csrf_token %}
                   <input type="hidden" name="pid" value="{{ row.blocked_pid }}">
                   <input type="hidden" name="query" value="{{ row.blocked_query|truncatechars:500 }}">
                   <button class="btn btn-muted btn-sm" type="submit">Kill blocked ({{ row.blocked_pid }})</button>
                 </form>
-                <form class="inline" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
+                <form class="inline" method="post" action="{% url 'instance-kill-lock-chain' instance.pk %}" data-requires-mfa="true"
                       onsubmit="return confirmKill(event, 'Terminate BOTH pid {{ row.blocking_pid }} and pid {{ row.blocked_pid }} on {{ instance.name }}? This cannot be undone.');">
                   {% csrf_token %}
                   <input type="hidden" name="mode" value="chain">
@@ -190,7 +190,7 @@
     </div>
     {% endif %}
     {% if is_staff and activity %}
-    <form id="sessions-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}"
+      <form id="sessions-bulk-form" method="post" action="{% url 'instance-kill-chain' instance.pk %}" data-requires-mfa="true"
           onsubmit="var n=document.querySelectorAll('input[name=pid][form=\'sessions-bulk-form\']:checked').length; if(n===0){alert('Select at least one pid first.');return false;} return confirmKill(event, 'Terminate '+n+' selected pid(s) on {{ instance.name }}? This cannot be undone.');">
       {% csrf_token %}
       <input type="hidden" name="mode" value="bulk">
@@ -244,7 +244,7 @@
           <td>
             {% if row.pid not in blocking_pids %}
             <div id="session-actions-{{ forloop.counter0 }}" style="display:none;">
-              <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}"
+              <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}" data-requires-mfa="true"
                     onsubmit="return confirmKill(event, 'Terminate backend pid {{ row.pid }} on {{ instance.name }}? This cannot be undone.');">
                 {% csrf_token %}
                 <input type="hidden" name="pid" value="{{ row.pid }}">
