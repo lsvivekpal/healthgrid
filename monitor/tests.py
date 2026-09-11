@@ -7,9 +7,10 @@ from django.urls import reverse
 from datetime import datetime, timedelta, timezone as datetime_timezone
 
 from . import db
-from .models import AuditLog, LockAlert, NotificationSettings, RDSInstance
+from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance
+from .background import cleanup_monitor_history
 from .management.commands.monitor_locks import lock_key, process_instance
-from .notifications import _timestamp
+from .notifications import _timestamp, send_weekly_reports
 
 User = get_user_model()
 
@@ -338,6 +339,105 @@ class NotificationSettingsTests(TestCase):
         })
         self.assertEqual(response.status_code, 302)
         self.assertEqual(NotificationSettings.objects.get(pk=1).channel_webhook_url, long_url)
+
+    def test_staff_can_save_weekly_report_settings(self):
+        staff = User.objects.create_user("weekly-settings-staff", password="pw", is_staff=True)
+        self.client.login(username="weekly-settings-staff", password="pw")
+        response = self.client.post(reverse("notification-settings"), {
+            "channel_webhook_url": "https://teams.example/webhook",
+            "threshold_seconds": "120",
+            "interval_seconds": "30",
+            "weekly_report_enabled": "1",
+            "weekly_report_day": "4",
+            "weekly_report_hour": "10",
+            "report_base_url": "https://dashboard.example.com",
+            "resolved_alert_retention_days": "45",
+        })
+        self.assertEqual(response.status_code, 302)
+        config = NotificationSettings.objects.get(pk=1)
+        self.assertTrue(config.weekly_report_enabled)
+        self.assertEqual(config.weekly_report_day, 4)
+        self.assertEqual(config.weekly_report_hour, 10)
+        self.assertEqual(config.report_base_url, "https://dashboard.example.com")
+        self.assertEqual(config.resolved_alert_retention_days, 45)
+
+    def test_cleanup_removes_only_old_resolved_alerts_and_expired_reports(self):
+        instance = make_instance()
+        now = timezone.now()
+        NotificationSettings.objects.create(pk=1, resolved_alert_retention_days=30)
+        old_resolved = LockAlert.objects.create(
+            instance=instance,
+            alert_key="1:2",
+            blocked_pid=1,
+            blocking_pid=2,
+            first_seen_at=now - timedelta(days=40),
+            last_seen_at=now - timedelta(days=40),
+            resolved_at=now - timedelta(days=31),
+        )
+        recent_resolved = LockAlert.objects.create(
+            instance=instance,
+            alert_key="3:4",
+            blocked_pid=3,
+            blocking_pid=4,
+            first_seen_at=now - timedelta(days=10),
+            last_seen_at=now - timedelta(days=10),
+            resolved_at=now - timedelta(days=10),
+        )
+        active = LockAlert.objects.create(
+            instance=instance,
+            alert_key="5:6",
+            blocked_pid=5,
+            blocking_pid=6,
+            first_seen_at=now - timedelta(days=100),
+            last_seen_at=now,
+        )
+        expired_report = LockReport.objects.create(
+            file_name="expired.csv",
+            csv_content="header\n",
+            expires_at=now - timedelta(days=1),
+        )
+        fresh_report = LockReport.objects.create(
+            file_name="fresh.csv",
+            csv_content="header\n",
+            expires_at=now + timedelta(days=1),
+        )
+
+        deleted_alerts, deleted_reports = cleanup_monitor_history(now=now)
+
+        self.assertEqual(deleted_alerts, 1)
+        self.assertEqual(deleted_reports, 1)
+        self.assertFalse(LockAlert.objects.filter(pk=old_resolved.pk).exists())
+        self.assertTrue(LockAlert.objects.filter(pk=recent_resolved.pk).exists())
+        self.assertTrue(LockAlert.objects.filter(pk=active.pk).exists())
+        self.assertFalse(LockReport.objects.filter(pk=expired_report.pk).exists())
+        self.assertTrue(LockReport.objects.filter(pk=fresh_report.pk).exists())
+
+    @patch("monitor.notifications._post_webhook", return_value=True)
+    def test_weekly_report_uses_flow_envelope_and_csv(self, post_webhook):
+        instance = make_instance()
+        now = timezone.now()
+        LockAlert.objects.create(
+            instance=instance,
+            alert_key="11:22",
+            blocked_pid=11,
+            blocking_pid=22,
+            blocked_user="blocked_user",
+            blocking_user="blocking_user",
+            blocked_query="UPDATE orders",
+            blocking_query="ALTER TABLE orders",
+            waiting_seconds=180,
+            first_seen_at=now - timedelta(hours=2),
+            last_seen_at=now - timedelta(minutes=1),
+            alerted_at=now - timedelta(hours=1),
+        )
+        NotificationSettings.objects.create(pk=1, channel_webhook_url="https://teams.example/webhook")
+
+        self.assertTrue(send_weekly_reports(now=now))
+        payload = post_webhook.call_args.args[1]
+        self.assertEqual(payload["event_type"], "weekly_report")
+        self.assertEqual(payload["file_name"].endswith(".csv"), True)
+        self.assertIn("blocked_query", payload["csv_content"])
+        self.assertIn("UPDATE orders", payload["csv_content"])
 
     def test_non_staff_cannot_access_notification_settings(self):
         User.objects.create_user("settings-user", password="pw", is_staff=False)

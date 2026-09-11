@@ -6,17 +6,18 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from rest_framework import viewsets
 
 from . import db
-from .models import AuditLog, NotificationSettings, RDSInstance
-from .notifications import send_test_notification
+from .models import AuditLog, LockReport, NotificationSettings, RDSInstance
+from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
 from .permissions import IsStaffOrReadOnly
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
 
@@ -116,18 +117,43 @@ def notification_settings(request):
             except ValidationError:
                 messages.error(request, "Enter a valid Teams webhook URL or leave the field blank.")
                 return render(request, "monitor/notification_settings.html", {"notification_settings": config})
+        report_base_url = request.POST.get("report_base_url", "").strip().rstrip("/")
+        if len(report_base_url) > 2048:
+            messages.error(request, "The public dashboard URL must be 2048 characters or fewer.")
+            return render(request, "monitor/notification_settings.html", {"notification_settings": config})
+        if report_base_url:
+            try:
+                URLValidator()(report_base_url)
+            except ValidationError:
+                messages.error(request, "Enter a valid public dashboard URL or leave the field blank.")
+                return render(request, "monitor/notification_settings.html", {"notification_settings": config})
         try:
             threshold = int(request.POST.get("threshold_seconds", "120"))
             interval = int(request.POST.get("interval_seconds", "30"))
+            report_day = int(request.POST.get("weekly_report_day", "0"))
+            report_hour = int(request.POST.get("weekly_report_hour", "9"))
+            retention_days = int(request.POST.get("resolved_alert_retention_days", "30"))
         except ValueError:
-            messages.error(request, "Threshold and interval must be whole numbers.")
+            messages.error(request, "Threshold, interval, report schedule, and retention must be whole numbers.")
         else:
-            if threshold < 1 or interval < 1:
-                messages.error(request, "Threshold and interval must be at least 1 second.")
+            if (
+                threshold < 1
+                or interval < 1
+                or report_day not in range(7)
+                or report_hour not in range(24)
+                or retention_days < 7
+                or retention_days > 3650
+            ):
+                messages.error(request, "Use positive threshold/interval values, a valid report schedule, and retention from 7 to 3650 days.")
             else:
                 config.channel_webhook_url = webhook_url
                 config.threshold_seconds = threshold
                 config.interval_seconds = interval
+                config.weekly_report_enabled = bool(request.POST.get("weekly_report_enabled"))
+                config.weekly_report_day = report_day
+                config.weekly_report_hour = report_hour
+                config.report_base_url = report_base_url
+                config.resolved_alert_retention_days = retention_days
                 config.save()
                 messages.success(request, "Notification settings saved.")
                 return redirect("notification-settings")
@@ -153,6 +179,31 @@ def test_notification(request):
     if next_page == "instance-detail" and request.POST.get("instance_id"):
         return redirect("instance-detail", pk=request.POST["instance_id"])
     return redirect("instance-add")
+
+
+@login_required
+@require_POST
+def send_weekly_report_now(request):
+    _require_staff(request)
+    if send_weekly_reports():
+        messages.success(request, "Weekly lock report sent through the configured Teams webhook(s).")
+    else:
+        messages.error(request, "Weekly lock report was not sent. Configure a webhook and, for large reports, a public dashboard URL.")
+    return redirect("notification-settings")
+
+
+def download_weekly_report(request, token):
+    """Public, signed, short-lived CSV endpoint for the Power Automate flow."""
+    try:
+        report_id = TimestampSigner().unsign(token, max_age=REPORT_MAX_AGE_SECONDS)
+    except (BadSignature, SignatureExpired):
+        raise Http404("Report link expired")
+    report = get_object_or_404(LockReport, pk=report_id)
+    if report.expires_at < timezone.now():
+        raise Http404("Report link expired")
+    response = HttpResponse(report.csv_content, content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{report.file_name}"'
+    return response
 
 
 @login_required

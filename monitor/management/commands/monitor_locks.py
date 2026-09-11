@@ -104,10 +104,13 @@ def process_instance(instance, now=None):
                 alert.save(update_fields=["alerted_at"])
 
     active_alerts = LockAlert.objects.filter(instance=instance, resolved_at__isnull=True)
+    cleared_alerts = []
     for alert in active_alerts:
         if alert.alert_key in seen_keys:
             continue
         alert.resolved_at = now
+        if alert.alerted_at is not None:
+            cleared_alerts.append(alert)
         alert.save(update_fields=["resolved_at"])
 
     eligible_alerts = list(
@@ -149,6 +152,7 @@ def process_instance(instance, now=None):
             previous_active_keys=previous_keys,
             cleared_keys=cleared_keys,
             sent_at=now,
+            cleared_alerts=cleared_alerts,
         ):
             state.last_fingerprint = current_fingerprint
             state.last_active_keys = current_keys

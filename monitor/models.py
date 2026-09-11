@@ -140,6 +140,20 @@ class NotificationSettings(models.Model):
     channel_webhook_url = models.URLField(max_length=2048, blank=True, help_text="Shared Teams channel Workflow webhook")
     threshold_seconds = models.PositiveIntegerField(default=120)
     interval_seconds = models.PositiveIntegerField(default=30)
+    weekly_report_enabled = models.BooleanField(default=False)
+    weekly_report_day = models.PositiveSmallIntegerField(default=0, help_text="0=Monday through 6=Sunday")
+    weekly_report_hour = models.PositiveSmallIntegerField(default=9, help_text="Hour in IST, 0-23")
+    report_base_url = models.URLField(
+        max_length=2048,
+        blank=True,
+        help_text="Public dashboard URL used to create signed CSV links for Teams",
+    )
+    resolved_alert_retention_days = models.PositiveIntegerField(
+        default=30,
+        help_text="Days to keep resolved lock incidents in the dashboard database",
+    )
+    last_cleanup_at = models.DateTimeField(null=True, blank=True)
+    last_weekly_report_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -153,6 +167,21 @@ class NotificationSettings(models.Model):
 
     def __str__(self):
         return "Notification settings"
+
+
+class LockReport(models.Model):
+    """Short-lived CSV content served to Power Automate through a signed URL."""
+
+    file_name = models.CharField(max_length=255)
+    csv_content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["expires_at"])]
+
+    def __str__(self):
+        return self.file_name
 
 
 class MonitorLease(models.Model):

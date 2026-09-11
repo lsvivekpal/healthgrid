@@ -35,6 +35,12 @@ The web container starts the embedded lock monitor automatically. It uses a data
 
 Open Notification settings in the dashboard to add the shared Teams channel webhook and configure the alert threshold and check interval. Add an optional owner Teams Workflow webhook for each database in the Add instance form. The embedded monitor sends one aggregate summary per database, listing active blocked-to-blocking PID pairs. It sends an update only when the lock set or lock details change, and one final summary when all tracked locks clear. For a one-time local check or troubleshooting, run `python manage.py monitor_locks --once`.
 
+Teams Workflow payloads are envelopes. Set the lock-alert branch to post `triggerBody()?['card']` and test with the `event_type` value `lock_alert`. Weekly reports use `event_type` `weekly_report` and include `file_name`, `csv_content`, `report_rows`, and optionally `report_url`. In the weekly branch, use OneDrive for Business “Upload file from URL” when `report_url` is present; otherwise create the OneDrive file from `csv_content`, then post the card with the OneDrive link. Configure the public dashboard URL in Notification settings for large reports. The report link is signed and expires after seven days.
+
+Enable Weekly CSV report in Notification settings to schedule a weekly report in IST, or use “Send weekly report now” to verify the flow. Reports include active and cleared lock incidents from the previous seven days with full blocked and blocking SQL text.
+
+The monitor performs daily retention cleanup in the same embedded thread. Active incidents are never deleted; resolved incidents are kept for the configured retention period (30 days by default), and temporary report payloads expire after seven days. OneDrive is the long-term archive for weekly CSV reports.
+
 For reliable emergency access, configure a separate lock-control role on each instance from the instance detail page. It should be able to inspect all sessions and terminate backends, for example (using the permissions supported by your PostgreSQL/RDS setup):
 
 ```sql

@@ -9,7 +9,8 @@ from django.utils import timezone
 
 from . import db
 from .management.commands.monitor_locks import process_instance
-from .models import MonitorLease, NotificationSettings, RDSInstance
+from .models import LockAlert, LockReport, MonitorLease, NotificationSettings, RDSInstance
+from .notifications import DISPLAY_TIMEZONE, send_weekly_reports
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,48 @@ def run_monitor_cycle():
             logger.exception("Unexpected lock monitor failure for %s", instance)
 
 
+def maybe_send_weekly_report(now=None):
+    now = now or timezone.now()
+    config = NotificationSettings.load()
+    if not config.weekly_report_enabled:
+        return False
+
+    local_now = timezone.localtime(now, DISPLAY_TIMEZONE)
+    if local_now.weekday() != config.weekly_report_day or local_now.hour < config.weekly_report_hour:
+        return False
+
+    scheduled_week = local_now.isocalendar()[:2]
+    if config.last_weekly_report_at:
+        last_local = timezone.localtime(config.last_weekly_report_at, DISPLAY_TIMEZONE)
+        if last_local.isocalendar()[:2] == scheduled_week:
+            return False
+
+    delivered = send_weekly_reports(now)
+    if delivered:
+        config.last_weekly_report_at = now
+        config.save(update_fields=["last_weekly_report_at", "updated_at"])
+    return delivered
+
+
+def cleanup_monitor_history(now=None):
+    """Remove only old resolved incidents and expired temporary report payloads."""
+    now = now or timezone.now()
+    with transaction.atomic():
+        config = NotificationSettings.objects.select_for_update().get(pk=1)
+        if config.last_cleanup_at and now - config.last_cleanup_at < timedelta(hours=24):
+            return 0, 0
+
+        alert_cutoff = now - timedelta(days=max(1, config.resolved_alert_retention_days))
+        deleted_alerts, _details = LockAlert.objects.filter(
+            resolved_at__isnull=False,
+            resolved_at__lt=alert_cutoff,
+        ).delete()
+        deleted_reports, _details = LockReport.objects.filter(expires_at__lt=now).delete()
+        config.last_cleanup_at = now
+        config.save(update_fields=["last_cleanup_at", "updated_at"])
+    return deleted_alerts, deleted_reports
+
+
 def monitor_loop():
     owner_id = uuid.uuid4().hex
     while True:
@@ -47,6 +90,8 @@ def monitor_loop():
             close_old_connections()
             if acquire_monitor_lease(owner_id):
                 run_monitor_cycle()
+                maybe_send_weekly_report()
+                cleanup_monitor_history()
             interval = NotificationSettings.load().interval_seconds
         except Exception:
             logger.exception("Lock monitor loop failed")
