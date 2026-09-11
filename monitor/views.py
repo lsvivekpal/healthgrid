@@ -9,6 +9,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -16,7 +17,7 @@ from django.views.decorators.http import require_POST
 from rest_framework import viewsets
 
 from . import db
-from .models import AuditLog, LockReport, NotificationSettings, RDSInstance
+from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance
 from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
 from .permissions import IsStaffOrReadOnly
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
@@ -63,6 +64,19 @@ def _log_audit(instance, action, user, *, pid=None, query="", result="success", 
         result=result,
         detail=detail,
     )
+
+
+def _mark_manual_kill(instance, pids, user):
+    """Attribute active lock incidents affected by a successful manual kill."""
+    pids = [int(pid) for pid in pids]
+    if not pids:
+        return 0
+    return LockAlert.objects.filter(
+        instance=instance,
+        resolved_at__isnull=True,
+    ).filter(
+        Q(blocked_pid__in=pids) | Q(blocking_pid__in=pids)
+    ).update(clear_reason="manual_kill", cleared_by=user.get_username())
 
 
 # --- DRF API: instance registry CRUD ---
@@ -422,6 +436,7 @@ def kill_session(request, pk):
             detail="" if terminated else "pid was not running",
         )
         if terminated:
+            _mark_manual_kill(instance, [pid], request.user)
             messages.success(request, f"Terminated backend pid {pid}.")
         else:
             messages.warning(request, f"pid {pid} was not running.")
@@ -455,6 +470,7 @@ def kill_chain(request, pk):
             detail=f"pids={pids} terminated={terminated} not_running={not_running}",
         )
         if terminated:
+            _mark_manual_kill(instance, terminated, request.user)
             messages.success(request, f"Terminated {len(terminated)} pid(s): {terminated}.")
         if not_running:
             messages.warning(request, f"Already gone: {not_running}.")

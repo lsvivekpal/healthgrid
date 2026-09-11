@@ -49,7 +49,7 @@ def _pair_text(keys, limit=3200):
     return f"{visible} · … ({len(pairs)} total)"
 
 
-def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys, sent_at):
+def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys, sent_at, cleared_alerts=None):
     resolved = event == "cleared"
     state = "LOCK SUMMARY CLEARED" if resolved else "LOCK SUMMARY"
     status = "CLEARED" if resolved else "ACTIVE"
@@ -62,8 +62,16 @@ def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys
     active_count = len(alerts)
     active_text = _pair_text(current_keys)
     cleared_text = _pair_text(cleared_keys)
+    cleared_alerts = list(cleared_alerts or [])
+    manual_clears = [alert for alert in cleared_alerts if alert.clear_reason == "manual_kill"]
+    clear_reason = "MANUALLY KILLED" if manual_clears else ("AUTO-CLEARED" if cleared_alerts else "—")
+    cleared_by = _pair_text(sorted({alert.cleared_by for alert in manual_clears if alert.cleared_by}), limit=1200)
+    killed_pids = sorted({pid for alert in manual_clears for pid in (alert.blocked_pid, alert.blocking_pid)})
     if resolved:
-        message = "All tracked locks are cleared."
+        if manual_clears:
+            message = f"All tracked locks are cleared. Manual kill recorded by {cleared_by} for PID(s): {_pair_text(killed_pids, limit=600)}."
+        else:
+            message = "All tracked locks are cleared automatically."
     elif active_count == 1:
         message = "1 lock is still active. Action required: review the blocking session."
     else:
@@ -78,6 +86,8 @@ def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys
         f"Active PID pairs: {active_text}\n"
         f"Cleared since previous card: {cleared_count}\n"
         f"Cleared PID pairs: {cleared_text}\n"
+        f"Clear reason: {clear_reason}\n"
+        f"Cleared by: {cleared_by}\n"
         f"Previously active: {previous_count}\n"
         f"First observed: {_timestamp(first_seen)}\n"
         f"Last observed: {_timestamp(last_seen or sent_at)}\n"
@@ -92,8 +102,13 @@ def _query_detail_container(title, alerts, max_items=20):
     visible_alerts = list(alerts)[:max_items]
     items = [{"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Small"}]
     for alert in visible_alerts:
+        resolution = " · MANUALLY KILLED" if alert.clear_reason == "manual_kill" else (" · AUTO-CLEARED" if alert.clear_reason == "auto_clear" else "")
+        cleared_by = f" by {alert.cleared_by}" if alert.clear_reason == "manual_kill" and alert.cleared_by else ""
+        headline = {"type": "TextBlock", "text": f"{alert.blocked_pid} → {alert.blocking_pid} · {alert.blocked_user or '—'} → {alert.blocking_user or '—'}{resolution}{cleared_by}", "weight": "Bolder", "size": "Small", "spacing": "Small"}
+        if alert.clear_reason == "manual_kill":
+            headline["color"] = "Good"
         items.extend([
-            {"type": "TextBlock", "text": f"{alert.blocked_pid} → {alert.blocking_pid} · {alert.blocked_user or '—'} → {alert.blocking_user or '—'}", "weight": "Bolder", "size": "Small", "spacing": "Small"},
+            headline,
             {"type": "TextBlock", "text": f"Blocked: {_short_query(alert.blocked_query, limit=420)}", "wrap": True, "fontType": "Monospace", "size": "Small", "spacing": "None"},
             {"type": "TextBlock", "text": f"Blocking: {_short_query(alert.blocking_query, limit=420)}", "wrap": True, "fontType": "Monospace", "size": "Small", "spacing": "None"},
         ])
@@ -155,6 +170,8 @@ def _adaptive_card(message, alerts=None, cleared_alerts=None, report=None):
                 {"title": "Active PID pairs", "value": values.get("Active PID pairs", "—")},
                 {"title": "Cleared since previous", "value": values.get("Cleared since previous card", "0")},
                 {"title": "Cleared PID pairs", "value": values.get("Cleared PID pairs", "—")},
+                {"title": "Clear reason", "value": values.get("Clear reason", "—")},
+                {"title": "Cleared by", "value": values.get("Cleared by", "—")},
                 {"title": "Alert event", "value": values.get("Alert event", "—")},
                 {"title": "First observed", "value": values.get("First observed", "—")},
                 {"title": "Last observed", "value": values.get("Last observed", "—")},
@@ -217,7 +234,7 @@ def _csv_report(alerts, now):
     writer.writerow([
         "database", "db_identifier", "region", "status", "blocked_pid", "blocked_user",
         "blocking_pid", "blocking_user", "first_observed_ist", "last_observed_ist",
-        "cleared_at_ist", "waiting_seconds", "blocked_query", "blocking_query",
+        "cleared_at_ist", "clear_reason", "cleared_by", "waiting_seconds", "blocked_query", "blocking_query",
     ])
     for alert in alerts:
         writer.writerow([
@@ -232,6 +249,8 @@ def _csv_report(alerts, now):
             _timestamp(alert.first_seen_at),
             _timestamp(alert.last_seen_at),
             _timestamp(alert.resolved_at),
+            alert.clear_reason or "",
+            alert.cleared_by or "",
             alert.waiting_seconds,
             alert.blocked_query,
             alert.blocking_query,
@@ -349,7 +368,7 @@ def send_test_notification(webhook_url, destination="Teams"):
 
 def notify_lock_summary(instance, alerts, *, event, previous_active_keys, cleared_keys, sent_at, cleared_alerts=None):
     """Send one aggregate lock summary to the channel and owner webhook."""
-    message = _summary_message(instance, alerts, event, previous_active_keys, cleared_keys, sent_at)
+    message = _summary_message(instance, alerts, event, previous_active_keys, cleared_keys, sent_at, cleared_alerts=cleared_alerts)
     delivered = False
 
     webhook_urls = list(dict.fromkeys(filter(None, [

@@ -109,9 +109,11 @@ def process_instance(instance, now=None):
         if alert.alert_key in seen_keys:
             continue
         alert.resolved_at = now
+        if not alert.clear_reason:
+            alert.clear_reason = "auto_clear"
         if alert.alerted_at is not None:
             cleared_alerts.append(alert)
-        alert.save(update_fields=["resolved_at"])
+        alert.save(update_fields=["resolved_at", "clear_reason"])
 
     eligible_alerts = list(
         LockAlert.objects.filter(

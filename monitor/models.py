@@ -104,6 +104,8 @@ class LockAlert(models.Model):
     last_seen_at = models.DateTimeField()
     alerted_at = models.DateTimeField(null=True, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
+    clear_reason = models.CharField(max_length=32, blank=True)
+    cleared_by = models.CharField(max_length=150, blank=True)
 
     class Meta:
         indexes = [

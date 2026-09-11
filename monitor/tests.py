@@ -10,7 +10,7 @@ from . import db
 from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance
 from .background import cleanup_monitor_history
 from .management.commands.monitor_locks import lock_key, process_instance
-from .notifications import _timestamp, send_weekly_reports
+from .notifications import _adaptive_card, _summary_message, _timestamp, send_weekly_reports
 
 User = get_user_model()
 
@@ -119,6 +119,14 @@ class KillSessionPermissionTests(TestCase):
 
     def test_staff_kill_creates_audit_log(self):
         self.client.login(username="staffer", password="pw")
+        alert = LockAlert.objects.create(
+            instance=self.instance,
+            alert_key="555:777",
+            blocked_pid=555,
+            blocking_pid=777,
+            first_seen_at=timezone.now(),
+            last_seen_at=timezone.now(),
+        )
         with patch.object(db, "kill_pid", return_value=True) as mock_kill:
             resp = self.client.post(
                 reverse("instance-kill", args=[self.instance.pk]),
@@ -130,6 +138,9 @@ class KillSessionPermissionTests(TestCase):
         self.assertEqual(log.target_pid, 555)
         self.assertEqual(log.result, "success")
         self.assertEqual(log.performed_by, self.staff)
+        alert.refresh_from_db()
+        self.assertEqual(alert.clear_reason, "manual_kill")
+        self.assertEqual(alert.cleared_by, "staffer")
 
     def test_anonymous_redirected_to_login(self):
         resp = self.client.post(
@@ -438,6 +449,31 @@ class NotificationSettingsTests(TestCase):
         self.assertEqual(payload["file_name"].endswith(".csv"), True)
         self.assertIn("blocked_query", payload["csv_content"])
         self.assertIn("UPDATE orders", payload["csv_content"])
+
+    def test_cleared_card_highlights_manual_kill_operator(self):
+        instance = make_instance()
+        now = timezone.now()
+        alert = LockAlert.objects.create(
+            instance=instance,
+            alert_key="11:22",
+            blocked_pid=11,
+            blocking_pid=22,
+            blocked_query="UPDATE orders",
+            blocking_query="ALTER TABLE orders",
+            first_seen_at=now - timedelta(minutes=5),
+            last_seen_at=now - timedelta(minutes=1),
+            alerted_at=now - timedelta(minutes=4),
+            resolved_at=now,
+            clear_reason="manual_kill",
+            cleared_by="staffer",
+        )
+        message = _summary_message(instance, [], "cleared", ["11:22"], ["11:22"], now, [alert])
+        self.assertIn("MANUAL", message)
+        self.assertIn("staffer", message)
+        card = _adaptive_card(message, cleared_alerts=[alert])
+        card_text = str(card)
+        self.assertIn("MANUALLY KILLED", card_text)
+        self.assertIn("staffer", card_text)
 
     def test_non_staff_cannot_access_notification_settings(self):
         User.objects.create_user("settings-user", password="pw", is_staff=False)
