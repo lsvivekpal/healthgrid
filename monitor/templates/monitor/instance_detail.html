@@ -60,7 +60,7 @@
     </div>
     <form method="post" action="{% url 'instance-owner-webhook' instance.pk %}" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
       {% csrf_token %}
-      <div style="flex:1;min-width:280px;">
+      <div class="owner-webhook-field">
         <label for="id_owner_teams_webhook_url" style="margin:0 0 6px;">Owner Teams webhook</label>
         <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ instance.owner_teams_webhook_url }}" placeholder="https://..." autocomplete="off">
       </div>
@@ -119,16 +119,16 @@
   {% endif %}
 </div>
 
-<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:16px;">
+<nav class="section-nav" aria-label="Instance sections">
   <a href="#locks" class="btn btn-ghost btn-sm">Locks <span id="pill-locks" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
   <a href="#sessions" class="btn btn-ghost btn-sm">Sessions <span id="pill-sessions" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
   <a href="#replication-slots" class="btn btn-ghost btn-sm">Replication slots <span id="pill-slots" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
   <a href="#audit-log" class="btn btn-ghost btn-sm">Audit log</a>
-</div>
+</nav>
 
-<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:22px;">
+<div class="live-toolbar">
   <h3 style="margin:0;display:flex;align-items:center;gap:8px;">Live activity</h3>
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+  <div class="live-controls">
     <span id="refresh-spinner" style="display:none;font-size:12px;color:var(--brand);align-items:center;"><span class="spinner"></span>refreshing…</span>
     <span id="refresh-countdown" class="section-hint" style="min-width:96px;text-align:right;"></span>
     <div style="display:inline-flex;align-items:center;gap:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 4px 2px 9px;">
@@ -150,23 +150,23 @@
 </div>
 
 {% if user.is_staff %}
-<div class="card" style="margin-top:12px;">
-  <div class="card-title" style="font-size:13.5px;cursor:pointer;" onclick="var b=document.getElementById('kill-by-pid-body'); var open=b.style.display!=='none'; b.style.display=open?'none':'block'; document.getElementById('kill-by-pid-chevron').style.transform=open?'rotate(-90deg)':'rotate(0deg)';">
+<details class="card action-disclosure" style="margin-top:12px;">
+  <summary class="card-title" style="font-size:13.5px;">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--danger-dot);"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
     Kill by PID
     <span class="section-hint" style="font-weight:400;">for a pid not shown above, e.g. idle-in-transaction</span>
-    <svg id="kill-by-pid-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto;color:var(--text-faint);transition:transform 120ms ease;transform:rotate(-90deg);"><polyline points="6 9 12 15 18 9"/></svg>
-  </div>
-  <div id="kill-by-pid-body" style="display:none;">
+    <svg class="disclosure-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint);transition:transform 120ms ease;"><polyline points="6 9 12 15 18 9"/></svg>
+  </summary>
+  <div id="kill-by-pid-body">
     <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}" data-requires-mfa="true"
           onsubmit="return confirmKill(event, 'Terminate backend pid ' + this.pid.value + ' on {{ instance.name }}? This cannot be undone.');"
-          style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+          style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;">
       {% csrf_token %}
       <input type="number" name="pid" placeholder="PID" required style="width:140px;">
       <button class="btn btn-danger btn-sm" type="submit">Kill pid</button>
     </form>
   </div>
-</div>
+</details>
 {% endif %}
 
 <script>
@@ -227,6 +227,7 @@
   var pollInFlight = 0;
 
   function pollRefresh() {
+    if (window.confirmationOpen) return;
     POLL_TARGETS.forEach(function (id) {
       var el = document.getElementById(id);
       if (!el) return;

@@ -7,8 +7,8 @@
   <span style="color:var(--text);">Notification settings</span>
 </div>
 
-<div class="card" style="max-width:680px;">
-  <div class="card-title" style="font-size:17px;">Teams lock notifications</div>
+<div class="card settings-card" style="max-width:780px;">
+  <h2 style="margin:0;">Notification settings</h2>
   <p class="section-hint" style="margin:6px 0 20px;line-height:1.55;">
     These settings are stored in the dashboard database and are read by the embedded monitor. No environment variables are required.
   </p>
@@ -18,7 +18,7 @@
     <input type="url" name="channel_webhook_url" id="id_channel_webhook_url" value="{{ notification_settings.channel_webhook_url }}" placeholder="https://..." autocomplete="off">
     <div class="section-hint" style="margin-top:6px;line-height:1.45;">Configure a Teams Workflow webhook that posts to the shared alert channel.</div>
 
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px;">
+    <div class="form-grid" style="margin-top:18px;">
       <div>
         <label for="id_threshold_seconds">Alert after (seconds)</label>
         <input type="number" name="threshold_seconds" id="id_threshold_seconds" value="{{ notification_settings.threshold_seconds }}" min="1" required>
@@ -34,7 +34,7 @@
         Send lock notifications only during the schedule
       </label>
       <div class="section-hint" style="margin-top:6px;line-height:1.45;">Times are IST. Outside this window, lock checks continue and active locks remain available in the weekly report; a surviving lock gets a fresh summary when the window opens.</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:12px;max-width:440px;">
+      <div class="form-grid" style="margin-top:12px;">
         <div>
           <label for="id_notification_start_time">Enable notifications from</label>
           <input type="time" name="notification_start_time" id="id_notification_start_time" value="{{ notification_settings.notification_start_time|time:'H:i' }}" required>
@@ -61,7 +61,7 @@
         Alert on long-running manual queries
       </label>
       <div class="section-hint" style="margin-top:6px;line-height:1.45;">Checks active queries from tools such as DBeaver or TablePlus. Each PID/query execution is notified once after the threshold; it will not repeat while unchanged. Query changes or a new execution create a new alert.</div>
-      <div style="display:grid;grid-template-columns:minmax(180px,220px) 1fr;gap:12px;margin-top:12px;align-items:end;">
+      <div class="form-grid" style="margin-top:12px;align-items:end;">
         <div>
           <label for="id_manual_query_threshold_seconds">Alert after (seconds)</label>
           <input type="number" name="manual_query_threshold_seconds" id="id_manual_query_threshold_seconds" value="{{ notification_settings.manual_query_threshold_seconds }}" min="1" required>
@@ -81,7 +81,7 @@
         Enable the weekly lock report
       </label>
       <div class="section-hint" style="margin-top:6px;line-height:1.45;">The embedded monitor sends one report per week through the same Teams webhook. Times are IST.</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:12px;">
+      <div class="form-grid" style="margin-top:12px;">
         <div>
           <label for="id_weekly_report_day">Send on</label>
           <select name="weekly_report_day" id="id_weekly_report_day">
@@ -104,7 +104,7 @@
       <div class="section-hint" style="margin-top:6px;line-height:1.45;">Recommended in production. It lets Teams/Power Automate download the full report securely for seven days, even when SQL text is too large for an inline webhook payload.</div>
     </div>
 
-    <div style="display:flex;align-items:center;gap:10px;margin-top:22px;flex-wrap:wrap;">
+    <div class="settings-actions">
       <button class="btn btn-primary" type="submit">Save settings</button>
       <a class="btn btn-ghost" href="{% url 'instance-list' %}">Cancel</a>
     </div>
@@ -121,7 +121,7 @@
   </form>
 </div>
 
-<div class="card" style="max-width:680px;margin-top:16px;">
+<div class="card settings-card" style="max-width:780px;margin-top:16px;">
   <div class="card-title" style="font-size:14px;">Owner notifications</div>
   <p class="section-hint" style="margin:6px 0 0;line-height:1.55;">Each database can also have its own Teams Workflow webhook. Add it from the Add instance form; the monitor posts one alert per lock incident to both the shared channel and that owner destination, then one cleared notification.</p>
 </div>

@@ -2,7 +2,7 @@
 {% block title %}MFA security · RDS Dashboard{% endblock %}
 {% block content %}
 <div class="breadcrumb"><a href="{% url 'instance-list' %}">All instances</a><span style="color:var(--text-faint);">/</span><span style="color:var(--text);">MFA security</span></div>
-<div class="card" style="max-width:780px;">
+<div class="card settings-card" style="max-width:780px;">
   <div class="card-header">
     <div>
       <div class="card-title">Authenticator security</div>
@@ -26,14 +26,14 @@
     </div>
   {% else %}
     {% if error %}<div style="background:var(--danger-bg);color:var(--danger-fg);border:1px solid var(--danger-border);padding:10px 12px;border-radius:var(--radius-sm);font-size:13px;margin-top:16px;">{{ error }}</div>{% endif %}
-    <div style="display:grid;grid-template-columns:minmax(180px,240px) 1fr;gap:24px;align-items:start;margin-top:20px;">
+    <div class="mfa-grid">
       <div style="text-align:center;"><img src="{{ qr_data_uri }}" alt="Authenticator enrollment QR code" style="width:210px;height:210px;background:#fff;padding:8px;border-radius:10px;border:1px solid var(--border);"><div class="section-hint" style="margin-top:8px;">Scan with Google Authenticator</div></div>
       <div>
         <label style="margin-top:0;">Can’t scan? Enter this setup key</label>
         <code style="display:block;word-break:break-all;padding:11px 12px;">{{ secret }}</code>
         <p class="section-hint" style="line-height:1.45;">Add it as a time-based account. The code changes every 30 seconds.</p>
         <label>Recovery codes</label>
-        <div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;">
+        <div class="recovery-grid">
           {% for code in backup_codes %}<code>{{ code }}</code>{% endfor %}
         </div>
         <p class="section-hint" style="line-height:1.45;">Save these somewhere safe. Each code works once if your phone is unavailable.</p>
@@ -47,7 +47,4 @@
     </div>
   {% endif %}
 </div>
-<style>
-  @media (max-width: 650px) { .card > div[style*="grid-template-columns:minmax(180px"] { grid-template-columns:1fr !important; } }
-</style>
 {% endblock %}

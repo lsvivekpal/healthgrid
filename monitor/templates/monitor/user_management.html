@@ -4,7 +4,7 @@
 <div class="breadcrumb">
   <a href="{% url 'instance-list' %}">All instances</a><span style="color:var(--text-faint);">/</span><span style="color:var(--text);">Users</span>
 </div>
-<div class="card" style="max-width:780px;">
+<div class="card settings-card" style="max-width:780px;">
   <div class="card-header">
     <div>
       <div class="card-title">Dashboard users</div>
@@ -14,7 +14,7 @@
   </div>
   <form method="post" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border);">
     {% csrf_token %}
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+    <div class="form-grid">
       <div><label for="id_username">Username</label><input type="text" name="username" id="id_username" required autocomplete="username"></div>
       <div><label for="id_email">Email (optional)</label><input type="email" name="email" id="id_email" autocomplete="email"></div>
       <div><label for="id_password">Temporary password</label><input type="password" name="password" id="id_password" required autocomplete="new-password"></div>
@@ -24,7 +24,7 @@
   </form>
 </div>
 
-<div class="card table-scroll" style="max-width:780px;padding:0;margin-top:16px;">
+<div class="card table-scroll settings-card" style="max-width:780px;padding:0;margin-top:16px;">
   <table class="responsive-table">
     <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th></tr></thead>
     <tbody>

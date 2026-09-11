@@ -7,7 +7,7 @@
     All instances
   </a>
 </div>
-<div class="card" style="max-width:520px;">
+<div class="card settings-card" style="max-width:640px;">
   <div class="card-title" style="font-size:17px;">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     Add RDS instance
@@ -32,7 +32,7 @@
     <label for="id_host">Endpoint host</label>
     <input type="text" name="host" id="id_host" value="{{ prefill.host|default:"" }}" required placeholder="my-app-prod.xxxx.us-east-1.rds.amazonaws.com">
 
-    <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;">
+    <div class="form-grid">
       <div>
         <label for="id_port">Port</label>
         <input type="number" name="port" id="id_port" value="{{ prefill.port|default:5432 }}" required>
