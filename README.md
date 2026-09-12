@@ -10,6 +10,7 @@ Instances are registered manually. The app connects directly to PostgreSQL; it d
 - [Architecture](#architecture)
 - [Local setup](#local-setup)
 - [Production deployment](#production-deployment)
+- [ALB and Nginx HTTPS](#alb-and-nginx-https)
 - [Environment configuration](#environment-configuration)
 - [Registering databases](#registering-databases)
 - [Dashboard and lock control](#dashboard-and-lock-control)
@@ -133,20 +134,26 @@ python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 Save the first value as `DJANGO_SECRET_KEY` and the second as `ENCRYPTION_KEY` in your secret store. Changing the encryption key makes existing encrypted DB passwords and MFA secrets unreadable; changing the signing key invalidates sessions and signed report links.
 
-Example private `.env.prod` for persistent single-instance SQLite; replace both secret placeholders:
+Example production environment; replace the domain, webhook hostname, database URL, and secret placeholders:
 
 ```dotenv
 DJANGO_DEBUG=false
 DJANGO_SECRET_KEY=REPLACE_WITH_A_STRONG_RANDOM_SECRET
 ENCRYPTION_KEY=REPLACE_WITH_A_VALID_FERNET_KEY
-DJANGO_ALLOWED_HOSTS=dashboard.example.com,localhost,127.0.0.1
+DJANGO_ALLOWED_HOSTS=dashboard.example.com
 CSRF_TRUSTED_ORIGINS=https://dashboard.example.com
 DJANGO_USE_HTTPS=true
-DATABASE_URL=sqlite:////data/dashboard.sqlite3
+DJANGO_ALLOW_HTTP=false
+DJANGO_MFA_REQUIRED=true
+DJANGO_HSTS_SECONDS=31536000
+DB_SSL_MODE=require
+DB_SSL_ROOT_CERT=
+WEBHOOK_ALLOWED_HOSTS=approved-teams-host.example.com
+DATABASE_URL=postgres://user:password@db-host:5432/rds_dashboard
 ACTIVITY_CACHE_TTL=10
 ```
 
-Set `DJANGO_USE_HTTPS=true` only behind a trusted TLS-terminating proxy that sets `X-Forwarded-Proto` correctly. Keep the environment file private and out of version control.
+`DJANGO_ALLOWED_HOSTS` contains hostnames only. `CSRF_TRUSTED_ORIGINS` includes the scheme and no trailing slash. Set `DJANGO_USE_HTTPS=true` only behind a trusted TLS-terminating proxy that sets `X-Forwarded-Proto` correctly. For a temporary HTTP-only test, explicitly set `DJANGO_USE_HTTPS=false` and `DJANGO_ALLOW_HTTP=true`; never use that combination for a public deployment. Keep the environment file private and out of version control. `.env` is ignored by Git and Docker; use `.env.example` as the variable reference.
 
 Example first deployment behind a reverse proxy on the same host:
 
@@ -161,7 +168,44 @@ docker run -d --name rds-dashboard --restart unless-stopped \
   gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 60
 ```
 
-The Dockerfile's default command is still `runserver`; override it with Gunicorn in production, including ECS task definitions. Do not use Gunicorn `--preload` with the current embedded-thread startup. Adapt networking when using an external load balancer rather than a host-local proxy.
+The production Dockerfile starts Gunicorn as the non-root `appuser` with one worker. Do not use Gunicorn `--preload` with the current embedded-thread startup. Local Compose intentionally overrides this with Django's development server and root access for bind-mounted development files.
+
+### ALB and Nginx HTTPS
+
+When the AWS Application Load Balancer terminates TLS, Nginx should listen on HTTP inside the private container network. Configure the ALB to redirect listener port 80 to HTTPS, forward HTTPS traffic to Nginx port 80, and send `X-Forwarded-Proto`. Do not expose the application port 8000 publicly.
+
+Use the Docker service name in Nginx; do not reference an undefined upstream alias:
+
+```nginx
+server {
+    listen 80;
+    server_name dashboard.example.com;
+
+    location / {
+        proxy_pass http://awsdashboard:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_set_header X-Forwarded-Port $http_x_forwarded_port;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+
+    location = /healthz {
+        proxy_pass http://awsdashboard:8000/healthz;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+The Nginx container and `awsdashboard` service must share a Docker network. Test the Nginx configuration before reload. The ALB health check should use `HTTP /healthz`; it is intentionally unauthenticated and returns only `{"status":"ok"}`.
 
 For upgrades, use a new image tag/digest, run `migrate --noinput` with the same database configuration, then update the service through its normal deployment process. Migration `0024_replication_slot_access` is required for operator slot grants. Preserve migration history; do not delete migrations already applied in production.
 
@@ -202,14 +246,21 @@ Notification options and monitored-database credentials are managed in the UI. I
 
 | Variable | Default / purpose |
 | --- | --- |
-| `DJANGO_SECRET_KEY` | Insecure development fallback; configure a stable strong secret |
-| `ENCRYPTION_KEY` | Development Fernet key; configure/preserve your own before storing production credentials |
+| `DJANGO_SECRET_KEY` | Required when debug is false; stable strong secret for sessions and signed report links |
+| `ENCRYPTION_KEY` | Required when debug is false; stable Fernet key for stored DB/MFA secrets |
 | `DJANGO_DEBUG` | `false`; development Compose explicitly sets `true` |
-| `DJANGO_ALLOWED_HOSTS` | `*`; replace with comma-separated production hostnames |
-| `DATABASE_URL` | SQLite at `/app/db.sqlite3` in the image; configure durable storage |
-| `DJANGO_USE_HTTPS` | `false`; enables secure cookies in non-debug mode and trusts forwarded protocol when `true` |
-| `CSRF_TRUSTED_ORIGINS` | Empty; comma-separated trusted origins including scheme |
+| `DJANGO_ALLOWED_HOSTS` | Required in production; comma-separated hostnames without scheme |
+| `DATABASE_URL` | Required in production; use durable PostgreSQL rather than ephemeral SQLite |
+| `DJANGO_USE_HTTPS` | Required in public production; enables secure cookies, redirect, HSTS, and forwarded-protocol handling |
+| `DJANGO_ALLOW_HTTP` | `false`; must be explicitly `true` to permit temporary non-TLS production mode |
+| `DJANGO_MFA_REQUIRED` | `true`; blocks dashboard use until authenticator enrollment is complete |
+| `DJANGO_HSTS_SECONDS` | `31536000` when HTTPS is enabled |
+| `CSRF_TRUSTED_ORIGINS` | Required for proxy/origin POSTs; comma-separated origins including scheme |
+| `DB_SSL_MODE` | `require` in production; use `verify-full` with `DB_SSL_ROOT_CERT` for CA/hostname verification |
+| `DB_SSL_ROOT_CERT` | Optional CA bundle path, only needed for `verify-full` |
+| `WEBHOOK_ALLOWED_HOSTS` | Required in production; comma-separated approved Teams/Power Automate hostnames only |
 | `ACTIVITY_CACHE_TTL` | `10` seconds; per-process cache of live dashboard reads |
+| `REPORT_BASE_URL` | Not an environment variable; configure the public HTTPS report URL in Notification Settings for large reports |
 | `DISABLE_EMBEDDED_LOCK_MONITOR` | `1` disables embedded polling, automatic reports, and automatic cleanup in that process |
 
 Notification cards, weekly report timestamps, and schedules use IST (`Asia/Kolkata`). Django's configured timezone is UTC; not all logs or ad-hoc CSV timestamps are IST.
@@ -310,7 +361,7 @@ Current action rules:
 - Dedicated slot-backend termination requires its role/grant but currently has no step-up MFA requirement. Generic live-session termination retains its own MFA rule.
 - Django admin instance deletion, including bulk deletion, is disabled to prevent bypassing removal MFA.
 
-See [Security and current limitations](#security-and-current-limitations) for onboarding/reset enforcement gaps before public exposure.
+Production MFA onboarding is enforced by middleware when `DJANGO_MFA_REQUIRED=true`. Login and MFA failures are throttled for 15 minutes after repeated failures; use a shared cache such as Redis if running multiple web workers/replicas.
 
 ## Teams notifications
 
@@ -524,17 +575,30 @@ This is **not a dry run**: it updates incident records and can send configured n
 Before Internet exposure, review this as a privileged database-control application, not merely an HTTPS-enabled website.
 
 - Replace development secrets, restrict allowed hosts and network access, configure trusted TLS termination, use least-privilege DB roles, and maintain dependencies.
-- Enrollment is not a global MFA access gate: password-only onboarding establishes a session before enrollment. The current `regenerate` MFA action also rotates enrollment without a separate action-code check. Review/harden these flows before relying on mandatory MFA everywhere.
-- There is no configured application-level login/OTP rate limiter. Add appropriate deployment controls and review authentication endpoints.
+- With `DJANGO_MFA_REQUIRED=true`, users who have not completed authenticator enrollment are redirected to setup and cannot use the dashboard or API. Enrollment still depends on the initial account password; use controlled account provisioning and rotate temporary passwords.
+- Login and MFA failures are throttled using the configured Django cache. The default local-memory cache is suitable only for the single-worker deployment; use a shared authenticated cache for multiple replicas.
 - Sessions use signed cookies: integrity-protected, not encrypted or centrally stored for per-session revocation. A sessions table does not mean server-side session revocation is active.
-- Read-only means no mutation, not redacted data. SQL remains visible, and the instance API includes configured owner-webhook URLs. Restrict dashboard/API access accordingly.
+- Read-only means no mutation, not redacted data. SQL remains visible. Owner webhook URLs are write-only in the API, but staff who can configure notifications can still use those bearer destinations; restrict staff access accordingly.
 - Treat webhooks, SQL literals, CSV payloads, share links, and exported Flow connection/destination identifiers as sensitive. The current `.dockerignore` is not a comprehensive sensitive-artifact filter; keep local DBs and unsanitized exports out of production builds/public repositories.
 - Signed report links are bearer links until expiry. Cleanup is not conditional on confirmed archival; use upload verification and backups.
-- Monitored-DB SSL uses `require`/`prefer`, not CA/hostname-verifying `verify-full`; there is no UI CA configuration.
+- Monitored-DB SSL is controlled by `DB_SSL_MODE`. Private RDS deployments normally use `require` (encrypted without a local CA file); use `verify-full` with a mounted `DB_SSL_ROOT_CERT` for certificate and hostname verification.
+- Webhook delivery requires HTTPS, rejects embedded credentials and redirects, blocks private/reserved destinations, and can be restricted to approved hostnames with `WEBHOOK_ALLOWED_HOSTS`.
 - Polling is sampled, not a complete event audit; query age approximates wait duration. Some lock/slot catalog data is server-wide, so registrations on the same PostgreSQL server can overlap.
 - Long-query classification uses active state and username exclusions, not reliable identification of a human/client tool.
 - Teams uses new summary messages, not one updated thread. Delivery success means any webhook accepted, not durable acknowledgement from every destination.
 - The UI currently loads HTMX and fonts externally. Restricted networks may need an appropriate self-hosted asset policy.
+
+### Public HTTPS verification
+
+Before release, perform a read-only check of the deployed hostname:
+
+```bash
+curl -I http://dashboard.example.com/
+curl -I https://dashboard.example.com/
+curl https://dashboard.example.com/healthz
+```
+
+Expected results are an HTTP-to-HTTPS redirect, a login redirect over HTTPS, and `{"status":"ok"}` from `/healthz`. Confirm TLS certificate validity, HSTS, secure cookies, unauthenticated API `403` responses, and that `.env`, source files, and invalid report tokens are not accessible. This is a deployment smoke test, not a substitute for an authorized authenticated penetration test.
 
 ## Code map and tests
 
