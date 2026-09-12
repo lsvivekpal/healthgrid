@@ -183,7 +183,8 @@ if not WEBHOOK_ALLOWED_HOSTS and not DEBUG:
 
 # PostgreSQL TLS is configurable for monitored connections. Private databases
 # can use disable; TLS deployments should use verify-full and provide a CA.
-# Private deployments can explicitly disable PostgreSQL TLS. If TLS is later
-# enabled, set DB_SSL_MODE=verify-full and provide DB_SSL_ROOT_CERT.
-DB_SSL_MODE = os.environ.get("DB_SSL_MODE", "prefer" if DEBUG else "disable")
+# RDS may require encrypted connections even inside a private VPC. `require`
+# encrypts traffic without requiring a local root certificate. Use verify-full
+# plus DB_SSL_ROOT_CERT when certificate verification is available.
+DB_SSL_MODE = os.environ.get("DB_SSL_MODE", "prefer" if DEBUG else "require")
 DB_SSL_ROOT_CERT = os.environ.get("DB_SSL_ROOT_CERT", "")
