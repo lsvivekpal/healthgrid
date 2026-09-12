@@ -178,8 +178,9 @@ WEBHOOK_ALLOWED_HOSTS = tuple(
 if not WEBHOOK_ALLOWED_HOSTS and not DEBUG:
     raise ImproperlyConfigured("WEBHOOK_ALLOWED_HOSTS must be set in production")
 
-# Verify the database server certificate for monitored TLS connections. Set
-# DB_SSL_ROOT_CERT to the mounted AWS RDS CA bundle when the base image does
-# not already trust it.
-DB_SSL_MODE = os.environ.get("DB_SSL_MODE", "prefer" if DEBUG else "verify-full")
+# PostgreSQL TLS is configurable for monitored connections. Private databases
+# can use disable; TLS deployments should use verify-full and provide a CA.
+# Private deployments can explicitly disable PostgreSQL TLS. If TLS is later
+# enabled, set DB_SSL_MODE=verify-full and provide DB_SSL_ROOT_CERT.
+DB_SSL_MODE = os.environ.get("DB_SSL_MODE", "prefer" if DEBUG else "disable")
 DB_SSL_ROOT_CERT = os.environ.get("DB_SSL_ROOT_CERT", "")

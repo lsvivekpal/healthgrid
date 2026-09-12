@@ -20,8 +20,7 @@
         { "name": "DJANGO_ALLOWED_HOSTS", "value": "dashboard.example.com" },
         { "name": "CSRF_TRUSTED_ORIGINS", "value": "https://dashboard.example.com" },
         { "name": "WEBHOOK_ALLOWED_HOSTS", "value": "approved-teams-host.example.com" },
-        { "name": "DB_SSL_MODE", "value": "verify-full" },
-        { "name": "DB_SSL_ROOT_CERT", "value": "/run/secrets/global-bundle.pem" }
+        { "name": "DB_SSL_MODE", "value": "disable" }
       ],
       "secrets": [
         { "name": "DJANGO_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/django-secret-key" },
