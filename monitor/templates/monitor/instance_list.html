@@ -85,7 +85,43 @@
 </div>
 
 {% if dashboard_links %}
-<section class="card" style="margin-top:24px;">
+<style>
+  .dashboard-link-tile {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border-color: transparent !important;
+    background: var(--surface) !important;
+    transition: transform 160ms ease, box-shadow 160ms ease;
+  }
+  .dashboard-link-tile::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background: linear-gradient(110deg, var(--brand), var(--accent), var(--brand));
+    background-size: 220% 100%;
+    animation: dashboard-border-flow 5s linear infinite;
+  }
+  .dashboard-link-tile::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    z-index: -1;
+    border-radius: 9px;
+    background: var(--surface);
+  }
+  .dashboard-link-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  @keyframes dashboard-border-flow { to { background-position: 220% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .dashboard-link-tile::before { animation: none; }
+    .dashboard-link-tile { transition: none; }
+  }
+</style>
+<section class="card" style="margin-top:20px;padding:14px 16px;">
   <div class="card-header">
     <div>
       <div class="card-title">Other dashboards</div>
@@ -93,15 +129,15 @@
     </div>
     <a class="btn btn-ghost btn-sm" href="{% url 'dashboard-links' %}">View all</a>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:12px;">
     {% for link in dashboard_links %}
-      <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="card" style="margin:0;padding:14px;text-decoration:none;display:block;">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
-          <strong style="color:var(--text);">{{ link.name }}</strong>
-          <span aria-hidden="true" style="color:var(--brand);font-size:16px;">↗</span>
+      <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="card dashboard-link-tile" style="margin:0;padding:10px 12px;border-radius:10px;text-decoration:none;display:block;min-height:62px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+          <strong style="color:var(--text);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ link.name }}</strong>
+          <span aria-hidden="true" style="color:var(--brand);font-size:14px;flex:0 0 auto;">↗</span>
         </div>
-        {% if link.category %}<div class="section-hint" style="margin-top:4px;">{{ link.category }}</div>{% endif %}
-        {% if link.description %}<div class="section-hint" style="margin-top:6px;line-height:1.4;">{{ link.description }}</div>{% endif %}
+        {% if link.category %}<div class="section-hint" style="margin-top:3px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ link.category }}</div>{% endif %}
+        {% if link.description %}<div class="section-hint" style="margin-top:2px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ link.description }}</div>{% endif %}
       </a>
     {% endfor %}
   </div>

@@ -209,9 +209,13 @@ def dashboard_links(request):
                 link.save()
                 messages.success(request, "Dashboard link saved.")
                 return redirect("dashboard-links")
+    editing_link = None
+    if request.user.is_superuser and request.GET.get("edit"):
+        editing_link = get_object_or_404(DashboardLink, pk=request.GET["edit"])
     return render(request, "monitor/dashboard_links.html", {
         "dashboard_links": DashboardLink.objects.all(),
         "can_manage_links": request.user.is_superuser,
+        "editing_link": editing_link,
     })
 
 

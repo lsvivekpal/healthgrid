@@ -41,3 +41,15 @@ class DashboardLinkTests(TestCase):
         response = self.client.post(reverse("dashboard-links"), {"name": "Bad", "url": "javascript:alert(1)"})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(DashboardLink.objects.exists())
+
+    def test_administrator_can_modify_link(self):
+        link = DashboardLink.objects.create(name="Old", url="https://old.example.com", created_by=self.admin)
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("dashboard-links"), {
+            "link_id": link.pk, "name": "New", "url": "https://new.example.com",
+            "description": "Updated", "sort_order": "2", "is_active": "1",
+        })
+        self.assertRedirects(response, reverse("dashboard-links"))
+        link.refresh_from_db()
+        self.assertEqual(link.name, "New")
+        self.assertEqual(link.description, "Updated")

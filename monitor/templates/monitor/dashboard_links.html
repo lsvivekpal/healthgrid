@@ -25,27 +25,29 @@
 
 {% if can_manage_links %}
 <div class="card" style="margin-top:22px;">
-  <div class="card-title">Manage dashboard links</div>
+  <div class="card-title">{% if editing_link %}Edit dashboard link{% else %}Manage dashboard links{% endif %}</div>
   <div class="section-hint" style="margin-top:5px;line-height:1.45;">Only Administrators can change this list. Use HTTP(S) URLs only; links are never fetched by the server.</div>
   <form method="post" style="margin-top:16px;">
     {% csrf_token %}
     <input type="hidden" name="action" value="save">
     <div class="form-grid">
-      <div><label for="id_name">Name</label><input id="id_name" name="name" required maxlength="100" placeholder="Operations dashboard"></div>
-      <div><label for="id_url">URL</label><input id="id_url" name="url" type="url" required maxlength="2048" placeholder="https://dashboard.example.com"></div>
-      <div><label for="id_category">Category</label><input id="id_category" name="category" maxlength="80" placeholder="Monitoring"></div>
-      <div><label for="id_sort_order">Display order</label><input id="id_sort_order" name="sort_order" type="number" min="0" value="0"></div>
+      <input type="hidden" name="link_id" value="{{ editing_link.pk|default:'' }}">
+      <div><label for="id_name">Name</label><input id="id_name" name="name" required maxlength="100" placeholder="Operations dashboard" value="{{ editing_link.name|default:'' }}"></div>
+      <div><label for="id_url">URL</label><input id="id_url" name="url" type="url" required maxlength="2048" placeholder="https://dashboard.example.com" value="{{ editing_link.url|default:'' }}"></div>
+      <div><label for="id_category">Category</label><input id="id_category" name="category" maxlength="80" placeholder="Monitoring" value="{{ editing_link.category|default:'' }}"></div>
+      <div><label for="id_sort_order">Display order</label><input id="id_sort_order" name="sort_order" type="number" min="0" value="{{ editing_link.sort_order|default:0 }}"></div>
     </div>
     <label for="id_description">Description</label>
-    <input id="id_description" name="description" maxlength="255" placeholder="Daily operations and alerts">
-    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;"><input type="checkbox" name="is_active" checked style="width:auto;"> Show this link</label>
-    <button class="btn btn-primary" type="submit" style="margin-top:16px;">Add dashboard link</button>
+    <input id="id_description" name="description" maxlength="255" placeholder="Daily operations and alerts" value="{{ editing_link.description|default:'' }}">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;"><input type="checkbox" name="is_active" {% if not editing_link or editing_link.is_active %}checked{% endif %} style="width:auto;"> Show this link</label>
+    <button class="btn btn-primary" type="submit" style="margin-top:16px;">{% if editing_link %}Update dashboard link{% else %}Add dashboard link{% endif %}</button>
+    {% if editing_link %}<a class="btn btn-ghost" href="{% url 'dashboard-links' %}" style="margin-top:16px;">Cancel edit</a>{% endif %}
   </form>
 
   {% if dashboard_links %}
   <div style="overflow-x:auto;margin-top:22px;">
     <table class="responsive-table"><thead><tr><th>Name</th><th>URL</th><th>Status</th><th>Action</th></tr></thead><tbody>
-      {% for link in dashboard_links %}<tr><td data-label="Name">{{ link.name }}</td><td data-label="URL" style="overflow-wrap:anywhere;">{{ link.url }}</td><td data-label="Status">{% if link.is_active %}Active{% else %}Hidden{% endif %}</td><td data-label="Action"><form method="post" style="margin:0;" onsubmit="return confirm('Remove this dashboard link?');">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="link_id" value="{{ link.pk }}"><button class="btn btn-danger btn-sm" type="submit">Remove</button></form></td></tr>{% endfor %}
+      {% for link in dashboard_links %}<tr><td data-label="Name">{{ link.name }}</td><td data-label="URL" style="overflow-wrap:anywhere;">{{ link.url }}</td><td data-label="Status">{% if link.is_active %}Active{% else %}Hidden{% endif %}</td><td data-label="Action" style="white-space:nowrap;"><a class="btn btn-ghost btn-sm" href="{% url 'dashboard-links' %}?edit={{ link.pk }}">Modify</a> <form method="post" style="display:inline;margin:0;" onsubmit="return confirm('Remove this dashboard link?');">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="link_id" value="{{ link.pk }}"><button class="btn btn-danger btn-sm" type="submit">Remove</button></form></td></tr>{% endfor %}
     </tbody></table>
   </div>
   {% endif %}
