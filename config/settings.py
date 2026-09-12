@@ -148,18 +148,21 @@ CSRF_TRUSTED_ORIGINS = [
 # is plain HTTP, leave false — Secure cookies get silently dropped by the
 # browser over HTTP, which looks exactly like a CSRF failure.
 USE_HTTPS = os.environ.get("DJANGO_USE_HTTPS", "false").lower() == "true"
+ALLOW_HTTP = os.environ.get("DJANGO_ALLOW_HTTP", "false").lower() == "true"
 if USE_HTTPS:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 if not DEBUG:
-    if not USE_HTTPS:
-        raise ImproperlyConfigured("DJANGO_USE_HTTPS=true is required in production")
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_SSL_REDIRECT = True
-    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "31536000"))
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+    if not USE_HTTPS and not ALLOW_HTTP:
+        raise ImproperlyConfigured(
+            "Set DJANGO_USE_HTTPS=true, or explicitly set DJANGO_ALLOW_HTTP=true for a temporary HTTP deployment"
+        )
+    SESSION_COOKIE_SECURE = USE_HTTPS
+    CSRF_COOKIE_SECURE = USE_HTTPS
+    SECURE_SSL_REDIRECT = USE_HTTPS
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "31536000")) if USE_HTTPS else 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = USE_HTTPS
+    SECURE_HSTS_PRELOAD = USE_HTTPS
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_REFERRER_POLICY = "same-origin"
     X_FRAME_OPTIONS = "DENY"

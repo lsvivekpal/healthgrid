@@ -15,6 +15,7 @@
         { "name": "AWS_REGION", "value": "REGION" },
         { "name": "DJANGO_DEBUG", "value": "false" },
         { "name": "DJANGO_USE_HTTPS", "value": "true" },
+        { "name": "DJANGO_ALLOW_HTTP", "value": "false" },
         { "name": "DJANGO_MFA_REQUIRED", "value": "true" },
         { "name": "DJANGO_HSTS_SECONDS", "value": "31536000" },
         { "name": "DJANGO_ALLOWED_HOSTS", "value": "dashboard.example.com" },
