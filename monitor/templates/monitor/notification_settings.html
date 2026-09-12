@@ -14,6 +14,7 @@
   </p>
   <form method="post">
     {% csrf_token %}
+    <input type="hidden" name="global_scope_submitted" value="1">
     <label for="id_channel_webhook_url">Shared Teams channel webhook</label>
     <input type="url" name="channel_webhook_url" id="id_channel_webhook_url" value="{{ notification_settings.channel_webhook_url }}" placeholder="https://..." autocomplete="off">
     <div class="section-hint" style="margin-top:6px;line-height:1.45;">Configure a Teams Workflow webhook that posts to the shared alert channel.</div>
@@ -52,6 +53,19 @@
     </div>
     <div class="section-hint" style="margin-top:10px;line-height:1.45;">
       Notifications are summarized per database. The first card lists active PID pairs, updates are sent only when the lock set or lock details change, and one final card is sent when all tracked locks clear. Unchanged locks do not generate heartbeat duplicates. Active locks are never removed; resolved records are cleaned daily after the retention period.
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">
+      <div class="card-title" style="font-size:14px;">Exclude database from global Teams notifications</div>
+      <div class="section-hint" style="margin-top:6px;line-height:1.45;">Select databases that must not send real-time lock or long-query cards to the shared channel. Weekly reports still include their lock history. Owner webhooks, monitoring, dashboard history, and instance-specific reports are unaffected.</div>
+      <div class="form-grid" style="margin-top:12px;">
+        {% for monitored_instance in notification_instances %}
+        <label style="display:flex;align-items:flex-start;gap:8px;margin:0;font-weight:400;min-width:0;">
+          <input type="checkbox" name="excluded_instance_ids" value="{{ monitored_instance.pk }}" {% if monitored_instance.exclude_from_global_notifications %}checked{% endif %} style="width:auto;margin-top:3px;">
+          <span style="min-width:0;overflow-wrap:anywhere;"><strong>{{ monitored_instance.name }}</strong><span class="section-hint" style="display:block;">{{ monitored_instance.db_identifier }} · {{ monitored_instance.region }}</span></span>
+        </label>
+        {% empty %}<span class="section-hint">No active instances are registered.</span>{% endfor %}
+      </div>
     </div>
 
     <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">

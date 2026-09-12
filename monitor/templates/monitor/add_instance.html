@@ -53,6 +53,11 @@
     <label for="id_owner_teams_webhook_url">Owner Teams webhook <span class="section-hint">(optional lock alerts)</span></label>
     <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ prefill.owner_teams_webhook_url|default:"" }}" placeholder="https://...">
 
+    <label style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;font-weight:400;color:var(--text);">
+      <input type="checkbox" name="exclude_from_global_notifications" id="id_exclude_from_global_notifications" {% if prefill.exclude_from_global_notifications %}checked{% endif %} style="width:auto;margin-top:3px;">
+      <span>Exclude from real-time global Teams alerts <span class="section-hint" style="display:block;line-height:1.4;">Skip real-time lock/query cards in the shared channel. Weekly reports and owner Teams notifications continue.</span></span>
+    </label>
+
     <label for="id_password">DB password</label>
     <input type="password" name="password" id="id_password" value="{{ prefill.password|default:"" }}" required>
 

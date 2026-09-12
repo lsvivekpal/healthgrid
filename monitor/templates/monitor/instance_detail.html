@@ -40,6 +40,7 @@
         </span>
         {% if instance.added_by %}<span>added by: <b>{{ instance.added_by }}</b></span>{% endif %}
         <span>since: <b>{{ instance.created_at|date:"Y-m-d" }}</b></span>
+        {% if instance.exclude_from_global_notifications %}<span class="badge badge-muted" title="Excluded from real-time shared/global Teams alerts; weekly reports remain included">real-time global alerts excluded</span>{% endif %}
       </div>
     </div>
   </div>
@@ -66,6 +67,10 @@
         <label for="id_owner_teams_webhook_url" style="margin:0 0 6px;">Owner Teams webhook</label>
         <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ instance.owner_teams_webhook_url }}" placeholder="https://..." autocomplete="off">
       </div>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin:0;max-width:330px;font-weight:400;">
+        <input type="checkbox" name="exclude_from_global_notifications" value="1" {% if instance.exclude_from_global_notifications %}checked{% endif %} style="width:auto;margin-top:3px;">
+        <span>Exclude from real-time global Teams alerts <span class="section-hint" style="display:block;line-height:1.35;">Weekly reports and owner notifications continue.</span></span>
+      </label>
       <button class="btn btn-ghost btn-sm" type="submit">Save owner webhook</button>
     </form>
     <style>

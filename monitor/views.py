@@ -232,9 +232,21 @@ def notification_settings(request):
                 config.report_base_url = report_base_url
                 config.resolved_alert_retention_days = retention_days
                 config.save()
+                if request.POST.get("global_scope_submitted") == "1":
+                    excluded_ids = {
+                        value for value in request.POST.getlist("excluded_instance_ids")
+                        if value.isdigit()
+                    }
+                    RDSInstance.objects.filter(is_active=True).update(exclude_from_global_notifications=False)
+                    RDSInstance.objects.filter(is_active=True, pk__in=excluded_ids).update(
+                        exclude_from_global_notifications=True,
+                    )
                 messages.success(request, "Notification settings saved.")
                 return redirect("notification-settings")
-    return render(request, "monitor/notification_settings.html", {"notification_settings": config})
+    return render(request, "monitor/notification_settings.html", {
+        "notification_settings": config,
+        "notification_instances": RDSInstance.objects.filter(is_active=True),
+    })
 
 
 @login_required
@@ -691,6 +703,7 @@ def add_instance(request):
             username=request.POST["username"],
             control_username=control_username,
             owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
+            exclude_from_global_notifications=bool(request.POST.get("exclude_from_global_notifications")),
             ssl_required=bool(request.POST.get("ssl_required")),
             added_by=request.user,
         )
@@ -713,6 +726,7 @@ def add_instance(request):
             "username": source.username,
             "control_username": source.control_username,
             "owner_teams_webhook_url": source.owner_teams_webhook_url,
+            "exclude_from_global_notifications": source.exclude_from_global_notifications,
             "password": source.get_password(),
             "ssl_required": source.ssl_required,
         }
@@ -784,8 +798,9 @@ def update_owner_webhook(request, pk):
             messages.error(request, "Enter a valid Teams webhook URL or leave the field blank.")
             return redirect("instance-detail", pk=instance.pk)
     instance.owner_teams_webhook_url = webhook_url
-    instance.save(update_fields=["owner_teams_webhook_url"])
-    messages.success(request, "Owner Teams webhook saved.")
+    instance.exclude_from_global_notifications = bool(request.POST.get("exclude_from_global_notifications"))
+    instance.save(update_fields=["owner_teams_webhook_url", "exclude_from_global_notifications"])
+    messages.success(request, "Owner Teams webhook and global notification setting saved.")
     return redirect("instance-detail", pk=instance.pk)
 
 

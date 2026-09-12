@@ -11,7 +11,7 @@ class RDSInstanceSerializer(serializers.ModelSerializer):
         model = RDSInstance
         fields = [
             "id", "name", "db_identifier", "region", "host", "port", "db_name",
-            "username", "password", "control_username", "control_password", "owner_teams_webhook_url", "ssl_required", "is_active", "added_by", "created_at",
+            "username", "password", "control_username", "control_password", "owner_teams_webhook_url", "exclude_from_global_notifications", "ssl_required", "is_active", "added_by", "created_at",
         ]
         read_only_fields = ["added_by", "created_at"]
 

@@ -336,6 +336,14 @@ Save settings before **Send test to shared channel**. Add/edit/test an owner web
 
 The app can send alerts to both destinations, deduplicating identical webhook URLs for alert messages. No separate CSV-upload webhook is required.
 
+Each instance has an **Exclude from real-time global Teams alerts** option on
+the Add instance form and detail page. When enabled, real-time lock and
+long-query cards for that instance skip the shared/global channel but still go
+to its owner webhook. The instance remains included in the all-databases weekly
+report, and its instance-specific weekly report still goes to the owner
+webhook. Monitoring, dashboard history, and local CSV exports are not disabled.
+New instances default to included.
+
 ### Timing and lock summaries
 
 The monitor checks registrations sequentially, then sleeps at least 5 seconds, normally the configured interval. Database/network work adds to the cycle duration.

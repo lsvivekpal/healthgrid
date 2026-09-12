@@ -341,8 +341,10 @@ def send_weekly_reports(now=None):
     config = NotificationSettings.load()
     LockReport.objects.filter(expires_at__lt=now).delete()
     delivered = False
+    # The exclusion controls real-time global alert cards only. Weekly reports
+    # intentionally retain the complete seven-day lock history.
     all_alerts = _weekly_alerts(now)
-    if config.channel_webhook_url:
+    if config.channel_webhook_url and all_alerts:
         delivered = _send_report_to_webhook(
             config.channel_webhook_url,
             scope="All monitored databases",
@@ -386,8 +388,9 @@ def notify_lock_summary(instance, alerts, *, event, previous_active_keys, cleare
     message = _summary_message(instance, alerts, event, previous_active_keys, cleared_keys, sent_at, cleared_alerts=cleared_alerts)
     delivered = False
 
+    config = NotificationSettings.load()
     webhook_urls = list(dict.fromkeys(filter(None, [
-        NotificationSettings.load().channel_webhook_url,
+        "" if instance.exclude_from_global_notifications else config.channel_webhook_url,
         instance.owner_teams_webhook_url,
     ])))
     for webhook_url in filter(None, webhook_urls):
@@ -467,8 +470,9 @@ def notify_long_query(instance, alerts, *, sent_at):
         return False
     card = _long_query_card(instance, alerts, sent_at)
     delivered = False
+    config = NotificationSettings.load()
     webhook_urls = list(dict.fromkeys(filter(None, [
-        NotificationSettings.load().channel_webhook_url,
+        "" if instance.exclude_from_global_notifications else config.channel_webhook_url,
         instance.owner_teams_webhook_url,
     ])))
     for webhook_url in webhook_urls:

@@ -21,6 +21,10 @@ class RDSInstance(models.Model):
         help_text="Optional dedicated monitoring/kill role; falls back to DB login username",
     )
     owner_teams_webhook_url = models.URLField(max_length=2048, blank=True, help_text="Teams Workflow webhook for this database owner")
+    exclude_from_global_notifications = models.BooleanField(
+        default=False,
+        help_text="Do not send real-time lock/query alerts to the shared/global Teams channel; weekly reports remain included",
+    )
     password_encrypted = models.CharField(
         max_length=512, help_text="Fernet-encrypted DB login password"
     )
