@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditLog, RDSInstance
+from .models import AuditLog, DashboardLink, RDSInstance
 
 
 @admin.register(RDSInstance)
@@ -24,3 +24,10 @@ class AuditLogAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+@admin.register(DashboardLink)
+class DashboardLinkAdmin(admin.ModelAdmin):
+    list_display = ("name", "category", "url", "is_active", "sort_order", "updated_at")
+    list_filter = ("is_active", "category")
+    search_fields = ("name", "url", "description", "category")

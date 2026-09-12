@@ -17,6 +17,7 @@ from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from urllib.parse import urlsplit
 from django.views.decorators.http import require_POST, require_http_methods
 from rest_framework import viewsets
 from rest_framework.permissions import IsAdminUser
@@ -24,7 +25,7 @@ from rest_framework.exceptions import PermissionDenied as APIPermissionDenied
 
 from . import db
 from .mfa import require_mfa_for_action
-from .models import AuditLog, LockAlert, LockReport, NotificationSettings, RDSInstance, ReplicationSlotAccess
+from .models import AuditLog, DashboardLink, LockAlert, LockReport, NotificationSettings, RDSInstance, ReplicationSlotAccess
 from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
 from .permissions import IsStaffOrReadOnly, can_manage_replication_slot
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
@@ -40,6 +41,13 @@ def _require_staff(request):
 def _require_administrator(request):
     if not (request.user.is_active and request.user.is_staff and request.user.is_superuser):
         raise PermissionDenied("Administrator permission required for this action.")
+
+
+def _validate_dashboard_url(value):
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValidationError("Use an HTTP(S) URL without embedded credentials.")
+    URLValidator()(value)
 
 
 def _require_slot_permission(request, action):
@@ -157,7 +165,54 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 @login_required
 def instance_list(request):
     instances = RDSInstance.objects.filter(is_active=True)
-    return render(request, "monitor/instance_list.html", {"instances": instances})
+    links = DashboardLink.objects.filter(is_active=True)
+    return render(request, "monitor/instance_list.html", {"instances": instances, "dashboard_links": links})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def dashboard_links(request):
+    """Show approved links to other dashboards; only Administrators edit them."""
+    if request.method == "POST":
+        _require_administrator(request)
+        action = request.POST.get("action", "save")
+        if action == "delete":
+            link = get_object_or_404(DashboardLink, pk=request.POST.get("link_id"))
+            link.delete()
+            messages.success(request, "Dashboard link removed.")
+            return redirect("dashboard-links")
+
+        name = request.POST.get("name", "").strip()
+        url = request.POST.get("url", "").strip()
+        description = request.POST.get("description", "").strip()
+        category = request.POST.get("category", "").strip()
+        try:
+            sort_order = int(request.POST.get("sort_order", "0"))
+        except (TypeError, ValueError):
+            sort_order = -1
+        if not name or len(name) > 100 or len(description) > 255 or len(category) > 80 or sort_order < 0:
+            messages.error(request, "Enter a name, valid description/category lengths, and a non-negative display order.")
+        else:
+            try:
+                _validate_dashboard_url(url)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0])
+            else:
+                link_id = request.POST.get("link_id")
+                link = get_object_or_404(DashboardLink, pk=link_id) if link_id else DashboardLink(created_by=request.user)
+                link.name = name
+                link.url = url
+                link.description = description
+                link.category = category
+                link.sort_order = sort_order
+                link.is_active = bool(request.POST.get("is_active"))
+                link.save()
+                messages.success(request, "Dashboard link saved.")
+                return redirect("dashboard-links")
+    return render(request, "monitor/dashboard_links.html", {
+        "dashboard_links": DashboardLink.objects.all(),
+        "can_manage_links": request.user.is_superuser,
+    })
 
 
 @login_required

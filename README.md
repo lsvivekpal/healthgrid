@@ -37,6 +37,7 @@ Instances are registered manually. The app connects directly to PostgreSQL; it d
 - Long-running query alerts for non-excluded database users.
 - Weekly lock-history CSV reports through the existing Teams Workflow, with OneDrive file creation handled by that workflow.
 - Responsive forms/tables, mobile session sorting, light/dark themes, accessible confirmation dialogs, and persistent error messages.
+- Centralized **Other dashboards** registry: Administrators maintain approved HTTP(S) links, and authenticated users open them safely in new browser tabs.
 - Audit history for control actions, protected-action MFA failures, and operator replication-permission changes.
 
 ## Architecture
@@ -510,6 +511,7 @@ The browser is the primary administration interface. REST uses Django session au
 | `/login/`, `/logout/`, `/mfa/verify/` | Login, POST logout, MFA verification |
 | `/settings/security/mfa/` | Enrollment/recovery/reset UI |
 | `/settings/users/` | Administrator-only account creation and operator slot grants |
+| `/settings/dashboards/` | Authenticated dashboard-link directory; Administrator-only editing |
 | `/settings/notifications/` | Thresholds, schedule, exclusions, reporting, retention |
 | `/settings/notifications/test/`, `/settings/notifications/weekly-report/` | POST test / manual report |
 | `/instances/add/`, `/instances/test-connection/` | Add/duplicate and connection test |
@@ -605,7 +607,7 @@ Expected results are an HTTP-to-HTTPS redirect, a login redirect over HTTPS, and
 | File/directory | Responsibility |
 | --- | --- |
 | [config/settings.py](config/settings.py) | Environment, database, session, security, and static settings |
-| [monitor/models.py](monitor/models.py) | Registry, audits/incidents, settings, MFA, grants, reports, lease |
+| [monitor/models.py](monitor/models.py) | Registry, audits/incidents, settings, MFA, grants, reports, lease, dashboard links |
 | [monitor/db.py](monitor/db.py) | PostgreSQL queries, connections/timeouts, guarded PID kills, slot operations |
 | [monitor/views.py](monitor/views.py), [monitor/urls.py](monitor/urls.py) | UI/actions, exports, configuration, API viewsets, routes |
 | [monitor/permissions.py](monitor/permissions.py) | Registry API permissions and operator slot grants |

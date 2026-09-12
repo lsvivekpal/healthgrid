@@ -193,6 +193,29 @@ class NotificationSettings(models.Model):
         return "Notification settings"
 
 
+class DashboardLink(models.Model):
+    """An administrator-managed link to another internal dashboard."""
+
+    name = models.CharField(max_length=100)
+    url = models.URLField(max_length=2048)
+    description = models.CharField(max_length=255, blank=True)
+    category = models.CharField(max_length=80, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_dashboard_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+
+    def __str__(self):
+        return self.name
+
+
 class ReplicationSlotAccess(models.Model):
     """Explicit operator grants; absence of a row means neither action is allowed."""
 

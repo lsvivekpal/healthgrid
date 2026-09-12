@@ -84,6 +84,30 @@
   {% endfor %}
 </div>
 
+{% if dashboard_links %}
+<section class="card" style="margin-top:24px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Other dashboards</div>
+      <div class="section-hint" style="margin-top:3px;">Quick access to approved team dashboards</div>
+    </div>
+    <a class="btn btn-ghost btn-sm" href="{% url 'dashboard-links' %}">View all</a>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px;">
+    {% for link in dashboard_links %}
+      <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="card" style="margin:0;padding:14px;text-decoration:none;display:block;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+          <strong style="color:var(--text);">{{ link.name }}</strong>
+          <span aria-hidden="true" style="color:var(--brand);font-size:16px;">↗</span>
+        </div>
+        {% if link.category %}<div class="section-hint" style="margin-top:4px;">{{ link.category }}</div>{% endif %}
+        {% if link.description %}<div class="section-hint" style="margin-top:6px;line-height:1.4;">{{ link.description }}</div>{% endif %}
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <script>
   var INSTANCE_POLL_INTERVAL = 10;
   var instancePollingPaused = false;

@@ -18,6 +18,7 @@ urlpatterns = [
     path("settings/notifications/test/", views.test_notification, name="test-notification"),
     path("settings/notifications/weekly-report/", views.send_weekly_report_now, name="send-weekly-report-now"),
     path("settings/users/", views.user_management, name="user-management"),
+    path("settings/dashboards/", views.dashboard_links, name="dashboard-links"),
     path("settings/security/mfa/", mfa_setup, name="mfa-setup"),
     path("reports/weekly/<str:token>/", views.download_weekly_report, name="download-weekly-report"),
     path("instances/<int:pk>/", views.instance_detail, name="instance-detail"),

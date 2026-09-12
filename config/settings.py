@@ -169,7 +169,7 @@ if not DEBUG:
 
 # Production requires users to finish authenticator enrollment before using the
 # dashboard. Local development keeps the old workflow for test fixtures.
-MFA_REQUIRED = os.environ.get("DJANGO_MFA_REQUIRED", "true").lower() == "true"
+MFA_REQUIRED = os.environ.get("DJANGO_MFA_REQUIRED", "false" if DEBUG else "true").lower() == "true"
 
 # Comma-separated Teams/Power Automate hostnames or suffixes. Keep this narrow
 # in production; the sender also blocks private/reserved destinations.
