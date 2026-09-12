@@ -2,14 +2,27 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-secret-change-in-prod")
-
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if h.strip()]
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "local-only-insecure-secret"
+    else:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false")
+
+allowed_hosts_value = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
+if not allowed_hosts_value and not DEBUG:
+    raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must list the public hostname in production")
+ALLOWED_HOSTS = [h.strip() for h in (allowed_hosts_value or "localhost,127.0.0.1").split(",") if h.strip()]
+
+database_url = os.environ.get("DATABASE_URL", "")
+if not database_url and not DEBUG:
+    raise ImproperlyConfigured("DATABASE_URL must be set when DJANGO_DEBUG is false")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -118,7 +131,12 @@ ACTIVITY_CACHE_TTL = int(os.environ.get("ACTIVITY_CACHE_TTL", "10"))
 # Fernet key encrypting stored RDS instance passwords at rest. Dev-only default below —
 # set a real key (Fernet.generate_key()) via env var in any shared/deployed environment,
 # changing it makes existing stored passwords undecryptable.
-ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "REDACTED_DEV_KEY")
+ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")
+if not ENCRYPTION_KEY:
+    if DEBUG:
+        ENCRYPTION_KEY = "REDACTED_DEV_KEY"
+    else:
+        raise ImproperlyConfigured("ENCRYPTION_KEY must be set when DJANGO_DEBUG is false")
 
 # Domains allowed to POST here (Django 4+ require this even for same-origin
 # requests through a reverse proxy). Comma-separated, must include scheme.
@@ -134,7 +152,34 @@ if USE_HTTPS:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 if not DEBUG:
-    SESSION_COOKIE_SECURE = USE_HTTPS
-    CSRF_COOKIE_SECURE = USE_HTTPS
-    SECURE_BROWSER_XSS_FILTER = True
+    if not USE_HTTPS:
+        raise ImproperlyConfigured("DJANGO_USE_HTTPS=true is required in production")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    X_FRAME_OPTIONS = "DENY"
+
+# Production requires users to finish authenticator enrollment before using the
+# dashboard. Local development keeps the old workflow for test fixtures.
+MFA_REQUIRED = os.environ.get("DJANGO_MFA_REQUIRED", "true").lower() == "true"
+
+# Comma-separated Teams/Power Automate hostnames or suffixes. Keep this narrow
+# in production; the sender also blocks private/reserved destinations.
+WEBHOOK_ALLOWED_HOSTS = tuple(
+    host.strip().lower()
+    for host in os.environ.get("WEBHOOK_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+)
+if not WEBHOOK_ALLOWED_HOSTS and not DEBUG:
+    raise ImproperlyConfigured("WEBHOOK_ALLOWED_HOSTS must be set in production")
+
+# Verify the database server certificate for monitored TLS connections. Set
+# DB_SSL_ROOT_CERT to the mounted AWS RDS CA bundle when the base image does
+# not already trust it.
+DB_SSL_MODE = os.environ.get("DB_SSL_MODE", "prefer" if DEBUG else "verify-full")
+DB_SSL_ROOT_CERT = os.environ.get("DB_SSL_ROOT_CERT", "")

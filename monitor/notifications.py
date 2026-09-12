@@ -3,10 +3,13 @@ import io
 import json
 import logging
 import urllib.request
+import ipaddress
+import socket
 from datetime import timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.core.signing import TimestampSigner
 from django.db import models
 from django.utils import timezone
@@ -217,14 +220,33 @@ def _adaptive_card(message, alerts=None, cleared_alerts=None, report=None):
 
 
 def _post_webhook(webhook_url, payload):
+    parts = urlsplit(webhook_url)
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+        raise ValueError("Webhook URL must be an HTTPS URL without embedded credentials")
+    hostname = parts.hostname.lower().rstrip(".")
+    allowed = settings.WEBHOOK_ALLOWED_HOSTS
+    if allowed and not any(hostname == item or hostname.endswith("." + item.lstrip("*.")) for item in allowed):
+        raise ValueError("Webhook hostname is not in WEBHOOK_ALLOWED_HOSTS")
+    addresses = {item[4][0] for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)}
+    for address in addresses:
+        parsed = ipaddress.ip_address(address)
+        if parsed.is_private or parsed.is_loopback or parsed.is_link_local or parsed.is_reserved or parsed.is_multicast:
+            raise ValueError("Webhook destination resolves to a private or reserved address")
+
     request = urllib.request.Request(
         webhook_url,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    with opener.open(request, timeout=10) as response:
         return 200 <= response.status < 300
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("Webhook redirects are not permitted")
 
 
 def _weekly_alerts(now=None, instance=None):

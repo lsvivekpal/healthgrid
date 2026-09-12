@@ -19,6 +19,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_http_methods
 from rest_framework import viewsets
+from rest_framework.permissions import IsAdminUser
 from rest_framework.exceptions import PermissionDenied as APIPermissionDenied
 
 from . import db
@@ -140,6 +141,7 @@ class RDSInstanceViewSet(viewsets.ModelViewSet):
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
+    permission_classes = [IsAdminUser]
 
     def get_queryset(self):
         qs = AuditLog.objects.all()

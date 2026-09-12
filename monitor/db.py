@@ -2,6 +2,7 @@ import logging
 
 import psycopg2
 import psycopg2.extras
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,8 @@ def get_connection(instance):
             user=username,
             password=password,
             connect_timeout=CONNECT_TIMEOUT_SECONDS,
-            sslmode="require" if instance.ssl_required else "prefer",
+            sslmode=settings.DB_SSL_MODE if instance.ssl_required else "prefer",
+            **({"sslrootcert": settings.DB_SSL_ROOT_CERT} if instance.ssl_required and settings.DB_SSL_ROOT_CERT else {}),
             application_name="rds-dashboard-control",
             options=(
                 f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS} "
@@ -270,7 +272,8 @@ def test_connection(host, port, db_name, username, password, ssl_required):
             user=username,
             password=password,
             connect_timeout=CONNECT_TIMEOUT_SECONDS,
-            sslmode="require" if ssl_required else "prefer",
+            sslmode=settings.DB_SSL_MODE if ssl_required else "prefer",
+            **({"sslrootcert": settings.DB_SSL_ROOT_CERT} if ssl_required and settings.DB_SSL_ROOT_CERT else {}),
             application_name="rds-dashboard-test",
             options=(
                 f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS} "

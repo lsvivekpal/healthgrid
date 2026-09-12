@@ -1,6 +1,7 @@
 from urllib.parse import quote
 
 from django.contrib.auth import logout
+from django.conf import settings
 from django.shortcuts import redirect
 from django.urls import reverse
 
@@ -15,6 +16,18 @@ class AdminMFARequiredMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        if (
+            settings.MFA_REQUIRED
+            and request.user.is_authenticated
+            and request.path not in {"/logout/", "/settings/security/mfa/"}
+            and not request.path.startswith("/admin/login")
+        ):
+            try:
+                profile = request.user.mfa_profile
+            except UserMFA.DoesNotExist:
+                profile = None
+            if not profile or not profile.enabled:
+                return redirect(f"{reverse('mfa-setup')}?next={quote(request.get_full_path(), safe='/?:=&')}")
         if (
             request.path.startswith("/admin/")
             and not request.path.startswith("/admin/login")

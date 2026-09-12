@@ -1,6 +1,9 @@
 services:
   web:
     build: .
+    # Development only: the source bind mount and SQLite fallback need the
+    # host user's write permissions. The production image runs as appuser.
+    user: "0:0"
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app

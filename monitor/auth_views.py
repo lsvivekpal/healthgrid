@@ -4,6 +4,7 @@ from django.contrib.auth import login
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
+from django.core.cache import cache
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -23,11 +24,49 @@ from .mfa import (
 from .models import UserMFA
 
 
+LOGIN_THROTTLE_LIMIT = 10
+LOGIN_THROTTLE_SECONDS = 15 * 60
+
+
+def _auth_throttle_key(request, subject):
+    address = request.META.get("REMOTE_ADDR", "unknown")
+    return f"auth-fail:{address}:{str(subject).strip().lower()[:150]}"
+
+
+def _is_throttled(key):
+    return int(cache.get(key, 0) or 0) >= LOGIN_THROTTLE_LIMIT
+
+
+def _record_failure(key):
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.add(key, 1, LOGIN_THROTTLE_SECONDS)
+
+
+def _clear_failures(key):
+    cache.delete(key)
+
+
 class DashboardLoginView(LoginView):
     template_name = "monitor/login.html"
 
+    def post(self, request, *args, **kwargs):
+        subject = request.POST.get("username", "")
+        if _is_throttled(_auth_throttle_key(request, subject)):
+            form = self.get_form()
+            form.add_error(None, "Too many sign-in attempts. Try again in 15 minutes.")
+            return self.render_to_response(self.get_context_data(form=form))
+        return super().post(request, *args, **kwargs)
+
+    def form_invalid(self, form):
+        subject = self.request.POST.get("username", "")
+        _record_failure(_auth_throttle_key(self.request, subject))
+        return super().form_invalid(form)
+
     def form_valid(self, form):
         user = form.get_user()
+        _clear_failures(_auth_throttle_key(self.request, user.get_username()))
         try:
             profile = user.mfa_profile
         except UserMFA.DoesNotExist:
@@ -67,7 +106,11 @@ def mfa_verify(request):
     error = ""
     if request.method == "POST":
         code = request.POST.get("code", "")
-        if verify_code(profile, code):
+        throttle_key = _auth_throttle_key(request, f"mfa:{user.pk}")
+        if _is_throttled(throttle_key):
+            error = "Too many verification attempts. Try again in 15 minutes."
+        elif verify_code(profile, code):
+            _clear_failures(throttle_key)
             next_url = request.session.get(PENDING_NEXT_SESSION_KEY) or reverse("instance-list")
             backend = request.session.get(PENDING_BACKEND_SESSION_KEY) or settings.AUTHENTICATION_BACKENDS[0]
             login(request, user, backend=backend)
@@ -75,7 +118,9 @@ def mfa_verify(request):
             for key in (PENDING_USER_SESSION_KEY, PENDING_BACKEND_SESSION_KEY, PENDING_NEXT_SESSION_KEY):
                 request.session.pop(key, None)
             return redirect(next_url)
-        error = "That authenticator or recovery code is invalid. Try again."
+        else:
+            _record_failure(throttle_key)
+            error = "That authenticator or recovery code is invalid. Try again."
     return render(request, "monitor/mfa_verify.html", {"error": error})
 
 

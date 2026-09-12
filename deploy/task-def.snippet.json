@@ -13,10 +13,19 @@
       "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
       "environment": [
         { "name": "AWS_REGION", "value": "REGION" },
-        { "name": "DJANGO_ALLOWED_HOSTS", "value": "dashboard.internal.example.com" }
+        { "name": "DJANGO_DEBUG", "value": "false" },
+        { "name": "DJANGO_USE_HTTPS", "value": "true" },
+        { "name": "DJANGO_MFA_REQUIRED", "value": "true" },
+        { "name": "DJANGO_HSTS_SECONDS", "value": "31536000" },
+        { "name": "DJANGO_ALLOWED_HOSTS", "value": "dashboard.example.com" },
+        { "name": "CSRF_TRUSTED_ORIGINS", "value": "https://dashboard.example.com" },
+        { "name": "WEBHOOK_ALLOWED_HOSTS", "value": "approved-teams-host.example.com" },
+        { "name": "DB_SSL_MODE", "value": "verify-full" },
+        { "name": "DB_SSL_ROOT_CERT", "value": "/run/secrets/global-bundle.pem" }
       ],
       "secrets": [
         { "name": "DJANGO_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/django-secret-key" },
+        { "name": "ENCRYPTION_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/encryption-key" },
         { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/database-url" }
       ],
       "healthCheck": {

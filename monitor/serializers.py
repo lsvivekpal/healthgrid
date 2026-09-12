@@ -6,6 +6,9 @@ from .models import AuditLog, RDSInstance
 class RDSInstanceSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     control_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # Webhook URLs are bearer secrets. They may be written by staff but are
+    # never returned in API responses, including to other staff users.
+    owner_teams_webhook_url = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = RDSInstance
