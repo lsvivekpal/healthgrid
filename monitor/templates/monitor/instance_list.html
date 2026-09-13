@@ -1,32 +1,78 @@
 {% extends "monitor/base.html" %}
 {% block title %}Instances &middot; RDS Dashboard{% endblock %}
 {% block content %}
-<div class="page-header-row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:10px;">
-  <div>
-    <h2 style="margin:0;">RDS Instances</h2>
-    <div class="section-hint" style="margin-top:2px;">Live lock &amp; session visibility across registered databases</div>
+<style>
+  .instance-heading { min-width:0; flex:1 1 auto; }
+  .instance-title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .instance-subtitle-row { display:flex; align-items:center; gap:8px; margin-top:4px; }
+  .live-dot { width:7px; height:7px; border-radius:50%; background:var(--ok-fg); box-shadow:0 0 0 3px var(--ok-bg); flex:0 0 auto; }
+  .refresh-bar { display:flex; align-items:center; justify-content:space-between; gap:14px; margin:14px 0 18px; padding:9px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); }
+  .refresh-bar-label { display:flex; align-items:center; gap:8px; min-width:180px; flex:1 1 auto; color:var(--text-muted); font-size:12px; }
+  .refresh-bar-label strong { color:var(--text); font-size:12px; }
+  .refresh-status, .refresh-preferences, .refresh-bar-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .refresh-status { min-height:30px; }
+  .refresh-preferences { gap:10px; }
+  .refresh-preferences label { display:flex; align-items:center; gap:5px; margin:0; white-space:nowrap; color:var(--text-muted); font-size:12px; }
+  .refresh-preferences input[type=checkbox] { width:15px; height:15px; margin:0; }
+  .refresh-preferences input[type=number] { width:58px; min-height:28px; padding:3px 5px; font-size:12px; }
+  .refresh-preferences input[type=number]::-webkit-inner-spin-button { opacity:1; }
+  .refresh-bar-actions { flex:0 1 auto; justify-content:flex-end; }
+  @media (max-width:980px) {
+    .refresh-bar { align-items:flex-start; }
+    .refresh-bar-label { min-width:150px; }
+    .refresh-bar-actions { flex:1 1 auto; justify-content:flex-end; }
+  }
+  @media (max-width:720px) {
+    .instance-title-row { align-items:flex-start; }
+    .instance-title-row .btn { flex:0 0 auto; }
+    .refresh-bar { align-items:flex-start; flex-direction:column; gap:9px; }
+    .refresh-bar-label { width:100%; }
+    .refresh-bar-actions { width:100%; justify-content:flex-start; }
+    .refresh-status { flex:1 1 100%; justify-content:flex-start; }
+    .refresh-preferences { flex:1 1 auto; justify-content:space-between; min-height:40px; }
+    .refresh-preferences input[type=number] { min-height:32px !important; }
+  }
+</style>
+<div class="page-header-row" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0;flex-wrap:wrap;gap:10px;">
+  <div class="instance-heading">
+    <div class="instance-title-row">
+      <h2 style="margin:0;">RDS Instances</h2>
+      {% if user.is_staff %}
+        <a class="btn btn-primary btn-sm" href="{% url 'instance-add' %}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add instance
+        </a>
+      {% endif %}
+    </div>
+    <div class="instance-subtitle-row">
+      <span class="live-dot" aria-hidden="true"></span>
+      <div class="section-hint">Live lock &amp; session visibility across registered databases</div>
+    </div>
   </div>
-  <div class="page-header-actions" style="display:flex;align-items:center;gap:12px;" aria-label="Refresh controls">
-    <span id="list-refresh-spinner" class="htmx-indicator" style="font-size:12px;color:var(--brand);"><span class="spinner"></span>refreshing…</span>
-    <span id="list-refresh-countdown" class="section-hint" style="min-width:92px;text-align:right;"></span>
-    <span id="list-last-updated" class="section-hint" style="min-width:104px;text-align:right;"></span>
-    <label class="section-hint" style="display:flex;align-items:center;gap:6px;white-space:nowrap;" title="Save this preference in the current browser">
-      <input type="checkbox" id="list-auto-refresh" style="width:auto;margin:0;">
-      Auto refresh
-    </label>
-    <label class="section-hint" style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
-      every <input type="number" id="list-refresh-interval" min="5" max="3600" step="5" style="width:64px;padding:5px 6px;" aria-label="Refresh interval in seconds"> sec
-    </label>
+</div>
+
+<div class="refresh-bar" aria-label="Refresh controls">
+  <div class="refresh-bar-label">
+    <span class="kpi-icon" style="width:28px;height:28px;border-radius:8px;background:var(--brand-soft);color:var(--brand);">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    </span>
+    <span><strong>Live refresh</strong><span style="display:block;">Updates are shown without leaving this page</span></span>
+  </div>
+  <div class="refresh-bar-actions">
+    <div class="refresh-status" aria-live="polite">
+      <span id="list-refresh-spinner" class="htmx-indicator" style="font-size:12px;color:var(--brand);"><span class="spinner"></span>refreshing…</span>
+      <span id="list-refresh-countdown" class="section-hint"></span>
+      <span id="list-last-updated" class="section-hint"></span>
+    </div>
+    <div class="refresh-preferences" title="These preferences are saved in the current browser">
+      <label for="list-auto-refresh"><input type="checkbox" id="list-auto-refresh"> Auto-refresh</label>
+      <label for="list-refresh-interval">Refresh every <input type="number" id="list-refresh-interval" min="5" max="3600" step="5" aria-label="Refresh interval in seconds"><span>sec</span></label>
+    </div>
     <button type="button" id="list-refresh-now" class="btn btn-ghost btn-sm" title="Refresh now" onclick="refreshInstanceCards()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Refresh
     </button>
     <button type="button" id="list-poll-toggle" class="btn btn-ghost btn-sm" onclick="toggleInstancePolling()">❙❙ Pause</button>
-    {% if user.is_staff %}
-      <a class="btn btn-primary" href="{% url 'instance-add' %}">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add instance
-      </a>
-    {% endif %}
   </div>
 </div>
 

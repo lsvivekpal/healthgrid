@@ -27,7 +27,7 @@ Instances are registered manually. The app connects directly to PostgreSQL; it d
 ## Features
 
 - Instance registry: add, duplicate, rename, test connections, and remove registrations with authorization and MFA.
-- Home dashboard: total/healthy instances, blocked locks, unreachable instances, 10-second refresh, pause/resume, and refresh now.
+- Home dashboard: total/healthy instances, blocked locks, unreachable instances, configurable auto-refresh, pause/resume, and refresh now.
 - Live sessions: users, client addresses, application names, state, wait events, query previews, durations, filtering, sorting, and CSV export.
 - Locks: blocked/blocking PID pairs, individual termination, role-based selection, bulk termination, and chain termination.
 - Database vitals: connection usage, session mix, longest active client query, database size, and ten largest tables.
@@ -295,7 +295,8 @@ Require SSL selects `sslmode=require`; unchecked selects `prefer`. Neither is ho
 
 ### Live views
 
-- Home refreshes every **10 seconds** with pause/resume and manual refresh.
+- Home auto-refresh defaults to **30 seconds**. The interval can be changed from 5 to 3600 seconds, disabled, or overridden with **Refresh now**. The preference is saved in the current browser.
+- Home polling pauses automatically when its browser tab is hidden and resumes when the tab becomes active. This browser setting does not affect background monitoring or Teams notifications.
 - KPI cards keep the normal background; blocked/unreachable counts use healthy colouring when zero.
 - Instance detail defaults to **15 seconds**, with 5/10/15/30/60-second choices saved in the browser.
 - Browser refresh is independent of background **Check every**. Cached data can remain unchanged until its TTL expires.
@@ -382,6 +383,7 @@ Open account menu → **Notification settings**. These settings are global, not 
 | Long-query threshold | `60` seconds |
 | Excluded query users | `applms,applos` |
 | Weekly report | Disabled; Monday at 09:00 IST when enabled |
+| Weekly report database retention | `7` days; selectable as 2, 3, or 7 days |
 | Public dashboard URL | Blank; enables signed report downloads |
 
 Save settings before **Send test to shared channel**. Add/edit/test an owner webhook on its instance page or while adding an instance. The workflow determines whether the owner destination is a chat or channel; the app does not resolve owner emails.
@@ -477,7 +479,7 @@ The supplied [workflow exports](flow/) use OneDrive for Business and default fol
 - **Public URL configured:** The app sends a signed `report_url` and empty `csv_content`. Power Automate must reach the URL; use publicly reachable HTTPS. `localhost`, private-only hosts, and proxy login challenges will not work from Microsoft's cloud service.
 - **Large CSV without a public URL:** Sending fails and logs the size issue. Automatic splitting or a secondary upload service is not implemented.
 
-Signed links expire after seven days and do not require dashboard login. Anyone holding a valid link can retrieve the CSV until expiry; treat it as a sensitive bearer link.
+Signed links expire no later than seven days and are also limited by the configured 2, 3, or 7-day report retention. They do not require dashboard login. Anyone holding a valid link can retrieve the CSV until expiry; treat it as a sensitive bearer link.
 
 ### Delivery verification
 
