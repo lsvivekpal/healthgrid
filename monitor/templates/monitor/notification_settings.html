@@ -115,7 +115,19 @@
       </div>
       <label for="id_report_base_url" style="margin-top:12px;">Public dashboard URL for large CSV files</label>
       <input type="url" name="report_base_url" id="id_report_base_url" value="{{ notification_settings.report_base_url }}" placeholder="https://rds-dashboard.example.com" autocomplete="off">
-      <div class="section-hint" style="margin-top:6px;line-height:1.45;">Recommended in production. It lets Teams/Power Automate download the full report securely for seven days, even when SQL text is too large for an inline webhook payload.</div>
+      <div class="section-hint" style="margin-top:6px;line-height:1.45;">Recommended in production. It lets Teams/Power Automate download the full report securely during the selected retention period, even when SQL text is too large for an inline webhook payload.</div>
+      <div class="form-grid" style="margin-top:12px;">
+        <div>
+          <label for="id_report_retention_days">Keep weekly report data in database</label>
+          <select name="report_retention_days" id="id_report_retention_days">
+            <option value="2" {% if notification_settings.report_retention_days == 2 %}selected{% endif %}>2 days</option>
+            <option value="3" {% if notification_settings.report_retention_days == 3 %}selected{% endif %}>3 days</option>
+            <option value="7" {% if notification_settings.report_retention_days == 7 %}selected{% endif %}>7 days</option>
+          </select>
+          <div class="section-hint" style="margin-top:6px;line-height:1.45;">Expired CSV payloads are cleaned automatically. Files already copied to OneDrive are not deleted by this setting.</div>
+        </div>
+      </div>
+      <div class="section-hint" style="margin-top:10px;line-height:1.45;">You can schedule the report for any one weekday, including Saturday or Sunday.</div>
     </div>
 
     <div class="settings-actions">

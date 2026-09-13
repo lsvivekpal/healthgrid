@@ -249,6 +249,7 @@ def notification_settings(request):
             interval = int(request.POST.get("interval_seconds", "30"))
             report_day = int(request.POST.get("weekly_report_day", "0"))
             report_hour = int(request.POST.get("weekly_report_hour", "9"))
+            report_retention_days = int(request.POST.get("report_retention_days", "7"))
             retention_days = int(request.POST.get("resolved_alert_retention_days", "30"))
             schedule_enabled = bool(request.POST.get("notification_schedule_enabled"))
             schedule_start = datetime.strptime(request.POST.get("notification_start_time", "09:00"), "%H:%M").time()
@@ -270,13 +271,14 @@ def notification_settings(request):
                 or interval < 1
                 or report_day not in range(7)
                 or report_hour not in range(24)
+                or report_retention_days not in {2, 3, 7}
                 or retention_days < 7
                 or retention_days > 3650
                 or (schedule_enabled and schedule_start == schedule_end)
                 or manual_query_threshold < 1
                 or len(manual_query_excluded_users) > 4000
             ):
-                messages.error(request, "Use positive thresholds, different notification start/end times, a valid report schedule, retention from 7 to 3650 days, and a valid excluded-user list.")
+                messages.error(request, "Use positive thresholds, different notification start/end times, report retention of 2, 3, or 7 days, resolved retention from 7 to 3650 days, and a valid excluded-user list.")
             else:
                 config.channel_webhook_url = webhook_url
                 config.threshold_seconds = threshold
@@ -291,6 +293,7 @@ def notification_settings(request):
                 config.weekly_report_day = report_day
                 config.weekly_report_hour = report_hour
                 config.report_base_url = report_base_url
+                config.report_retention_days = report_retention_days
                 config.resolved_alert_retention_days = retention_days
                 config.save()
                 if request.POST.get("global_scope_submitted") == "1":

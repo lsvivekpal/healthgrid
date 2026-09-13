@@ -325,7 +325,7 @@ def _send_report_to_webhook(webhook_url, *, scope, alerts, config, now):
     report = LockReport.objects.create(
         file_name=file_name,
         csv_content=csv_content,
-        expires_at=now + timedelta(seconds=REPORT_MAX_AGE_SECONDS),
+        expires_at=now + timedelta(days=config.report_retention_days),
     )
     report_url = _report_url(report, config.report_base_url)
     content_bytes = csv_content.encode("utf-8")

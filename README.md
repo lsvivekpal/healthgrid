@@ -491,7 +491,7 @@ The application stores incident snapshots/SQL for reporting; it does not copy Po
 | --- | --- |
 | Active lock / long-query incidents | Never deleted by automatic retention cleanup |
 | Resolved lock / long-query incidents | Deleted after configured days since resolution |
-| Temporary `LockReport` CSV payloads | Expire after seven days; expired records are cleaned |
+| Temporary `LockReport` CSV payloads | Expire after the configured 2, 3, or 7 days; expired records are cleaned |
 | Audit logs, users, settings, MFA, grants | No general automatic audit/account retention policy |
 | OneDrive CSV files | Governed by your workflow/OneDrive policies |
 

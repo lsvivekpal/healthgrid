@@ -172,6 +172,11 @@ class NotificationSettings(models.Model):
         blank=True,
         help_text="Public dashboard URL used to create signed CSV links for Teams",
     )
+    report_retention_days = models.PositiveSmallIntegerField(
+        default=7,
+        choices=((2, "2 days"), (3, "3 days"), (7, "7 days")),
+        help_text="Days to keep generated weekly report CSV payloads in the database",
+    )
     resolved_alert_retention_days = models.PositiveIntegerField(
         default=30,
         help_text="Days to keep resolved lock incidents in the dashboard database",

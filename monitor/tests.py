@@ -468,6 +468,7 @@ class NotificationSettingsTests(TestCase):
             "weekly_report_day": "4",
             "weekly_report_hour": "10",
             "report_base_url": "https://dashboard.example.com",
+            "report_retention_days": "3",
             "resolved_alert_retention_days": "45",
         })
         self.assertEqual(response.status_code, 302)
@@ -476,6 +477,7 @@ class NotificationSettingsTests(TestCase):
         self.assertEqual(config.weekly_report_day, 4)
         self.assertEqual(config.weekly_report_hour, 10)
         self.assertEqual(config.report_base_url, "https://dashboard.example.com")
+        self.assertEqual(config.report_retention_days, 3)
         self.assertEqual(config.resolved_alert_retention_days, 45)
 
     def test_staff_can_save_custom_notification_window(self):
