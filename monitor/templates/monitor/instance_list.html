@@ -148,8 +148,17 @@
   var INSTANCE_POLL_INTERVAL = 10;
   var instancePollingPaused = false;
   var instancePollRemaining = INSTANCE_POLL_INTERVAL;
+  var instanceRequestsInFlight = 0;
+
+  function isInstanceCardElement(element) {
+    return element && element.closest && element.closest('#card-grid > div');
+  }
 
   function refreshInstanceCards() {
+    // A slow/private RDS endpoint can take longer than the poll interval. Do
+    // not start another batch while the previous batch is still waiting; that
+    // otherwise creates duplicate DB connections and makes the UI slower.
+    if (instanceRequestsInFlight > 0) return;
     var cards = document.querySelectorAll('#card-grid > div');
     cards.forEach(function (card) {
       if (typeof htmx !== 'undefined') htmx.trigger(card, 'refresh');
@@ -202,6 +211,12 @@
   }
   document.body.addEventListener('htmx:afterSettle', function (evt) {
     if (evt.target && evt.target.closest('#card-grid')) recomputeStats();
+  });
+  document.body.addEventListener('htmx:beforeRequest', function (evt) {
+    if (isInstanceCardElement(evt.detail && evt.detail.elt)) instanceRequestsInFlight += 1;
+  });
+  document.body.addEventListener('htmx:afterRequest', function (evt) {
+    if (isInstanceCardElement(evt.detail && evt.detail.elt)) instanceRequestsInFlight = Math.max(0, instanceRequestsInFlight - 1);
   });
 
   (function () {
