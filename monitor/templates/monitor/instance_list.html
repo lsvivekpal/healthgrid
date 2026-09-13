@@ -9,6 +9,14 @@
   <div class="page-header-actions" style="display:flex;align-items:center;gap:12px;" aria-label="Refresh controls">
     <span id="list-refresh-spinner" class="htmx-indicator" style="font-size:12px;color:var(--brand);"><span class="spinner"></span>refreshing…</span>
     <span id="list-refresh-countdown" class="section-hint" style="min-width:92px;text-align:right;"></span>
+    <span id="list-last-updated" class="section-hint" style="min-width:104px;text-align:right;"></span>
+    <label class="section-hint" style="display:flex;align-items:center;gap:6px;white-space:nowrap;" title="Save this preference in the current browser">
+      <input type="checkbox" id="list-auto-refresh" style="width:auto;margin:0;">
+      Auto refresh
+    </label>
+    <label class="section-hint" style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
+      every <input type="number" id="list-refresh-interval" min="5" max="3600" step="5" style="width:64px;padding:5px 6px;" aria-label="Refresh interval in seconds"> sec
+    </label>
     <button type="button" id="list-refresh-now" class="btn btn-ghost btn-sm" title="Refresh now" onclick="refreshInstanceCards()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
     </button>
@@ -145,10 +153,41 @@
 {% endif %}
 
 <script>
-  var INSTANCE_POLL_INTERVAL = 10;
+  var INSTANCE_POLL_INTERVAL = 30;
   var instancePollingPaused = false;
+  var instanceManuallyPaused = false;
   var instancePollRemaining = INSTANCE_POLL_INTERVAL;
   var instanceRequestsInFlight = 0;
+  var instanceAutoRefreshEnabled = true;
+
+  (function loadRefreshPreferences() {
+    try {
+      var savedInterval = parseInt(localStorage.getItem('rds-dashboard-refresh-interval'), 10);
+      if (savedInterval >= 5 && savedInterval <= 3600) INSTANCE_POLL_INTERVAL = savedInterval;
+      instanceAutoRefreshEnabled = localStorage.getItem('rds-dashboard-auto-refresh') !== 'false';
+    } catch (error) {}
+    instancePollRemaining = INSTANCE_POLL_INTERVAL;
+    var enabled = document.getElementById('list-auto-refresh');
+    var interval = document.getElementById('list-refresh-interval');
+    if (enabled) enabled.checked = instanceAutoRefreshEnabled;
+    if (interval) interval.value = INSTANCE_POLL_INTERVAL;
+  })();
+
+  function saveRefreshPreferences() {
+    var enabled = document.getElementById('list-auto-refresh');
+    var interval = document.getElementById('list-refresh-interval');
+    var value = interval ? parseInt(interval.value, 10) : INSTANCE_POLL_INTERVAL;
+    if (!Number.isFinite(value)) value = INSTANCE_POLL_INTERVAL;
+    value = Math.max(5, Math.min(3600, value));
+    INSTANCE_POLL_INTERVAL = value;
+    instancePollRemaining = value;
+    instanceAutoRefreshEnabled = enabled ? enabled.checked : true;
+    if (interval) interval.value = value;
+    try {
+      localStorage.setItem('rds-dashboard-refresh-interval', String(value));
+      localStorage.setItem('rds-dashboard-auto-refresh', String(instanceAutoRefreshEnabled));
+    } catch (error) {}
+  }
 
   function isInstanceCardElement(element) {
     return element && element.closest && element.closest('#card-grid > div');
@@ -167,9 +206,10 @@
   }
 
   function toggleInstancePolling() {
-    instancePollingPaused = !instancePollingPaused;
+    instanceManuallyPaused = !instanceManuallyPaused;
+    instancePollingPaused = instanceManuallyPaused || document.hidden;
     var button = document.getElementById('list-poll-toggle');
-    if (button) button.textContent = instancePollingPaused ? '▶ Resume' : '❙❙ Pause';
+    if (button) button.textContent = instanceManuallyPaused ? '▶ Resume' : '❙❙ Pause';
     if (!instancePollingPaused) {
       instancePollRemaining = INSTANCE_POLL_INTERVAL;
       refreshInstanceCards();
@@ -210,7 +250,11 @@
     setKpiState('stat-unreachable', 'stat-unreachable-tile', 'stat-unreachable-icon', 'warn');
   }
   document.body.addEventListener('htmx:afterSettle', function (evt) {
-    if (evt.target && evt.target.closest('#card-grid')) recomputeStats();
+    if (evt.target && evt.target.closest('#card-grid')) {
+      recomputeStats();
+      var updated = document.getElementById('list-last-updated');
+      if (updated) updated.textContent = 'updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    }
   });
   document.body.addEventListener('htmx:beforeRequest', function (evt) {
     if (isInstanceCardElement(evt.detail && evt.detail.elt)) instanceRequestsInFlight += 1;
@@ -219,11 +263,36 @@
     if (isInstanceCardElement(evt.detail && evt.detail.elt)) instanceRequestsInFlight = Math.max(0, instanceRequestsInFlight - 1);
   });
 
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      instancePollingPaused = true;
+      var button = document.getElementById('list-poll-toggle');
+      if (button && !instanceManuallyPaused) button.textContent = '▶ Resume';
+    } else {
+      instancePollingPaused = instanceManuallyPaused;
+      instancePollRemaining = INSTANCE_POLL_INTERVAL;
+      var button = document.getElementById('list-poll-toggle');
+      if (button) button.textContent = instanceManuallyPaused ? '▶ Resume' : '❙❙ Pause';
+      if (!instanceManuallyPaused) refreshInstanceCards();
+    }
+  });
+
+  document.getElementById('list-auto-refresh').addEventListener('change', function () {
+    saveRefreshPreferences();
+  });
+  document.getElementById('list-refresh-interval').addEventListener('change', function () {
+    saveRefreshPreferences();
+  });
+
   (function () {
     var countdown = document.getElementById('list-refresh-countdown');
     setInterval(function () {
+      if (!instanceAutoRefreshEnabled) {
+        if (countdown) countdown.textContent = 'auto-refresh off';
+        return;
+      }
       if (instancePollingPaused) {
-        if (countdown) countdown.textContent = 'paused';
+        if (countdown) countdown.textContent = instanceManuallyPaused ? 'paused' : 'tab hidden';
         return;
       }
       instancePollRemaining -= 1;
