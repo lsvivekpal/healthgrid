@@ -45,6 +45,11 @@
           <input type="time" name="notification_end_time" id="id_notification_end_time" value="{{ notification_settings.notification_end_time|time:'H:i' }}" required>
         </div>
       </div>
+      <div style="margin-top:12px;max-width:300px;">
+        <label for="id_lock_storm_threshold">Lock-storm alert threshold (active PID pairs)</label>
+        <input type="number" name="lock_storm_threshold" id="id_lock_storm_threshold" value="{{ notification_settings.lock_storm_threshold }}" min="0" max="100000" required>
+        <div class="section-hint" style="margin-top:6px;line-height:1.45;">Sends one compact Teams alert immediately when this many locks appear in one check. Set 0 to disable. The alert is not repeated until all locks clear; full details remain in the dashboard and weekly CSV.</div>
+      </div>
       <div class="section-hint" style="margin-top:6px;line-height:1.45;">Overnight windows are supported too, for example 21:00 to 09:00. The weekly report is not suppressed by this setting.</div>
     </div>
     <div style="margin-top:12px;max-width:260px;">

@@ -376,6 +376,7 @@ Open account menu → **Notification settings**. These settings are global, not 
 | Shared channel webhook | Blank; Workflow destination for alerts and reports |
 | Alert after | `120` seconds; lock eligibility threshold |
 | Check every | `30` seconds; background sleep between cycles |
+| Lock-storm threshold | `100` active PID pairs; one compact alert per storm, `0` disables |
 | Notification schedule | Disabled; uses IST when enabled |
 | Schedule start/end | `09:00` / `21:00` |
 | Keep resolved records | `30` days; UI range 7–3650 |

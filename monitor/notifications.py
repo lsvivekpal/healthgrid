@@ -69,9 +69,9 @@ def _pair_text(keys, limit=3200):
 
 def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys, sent_at, cleared_alerts=None):
     resolved = event == "cleared"
-    state = "LOCK SUMMARY CLEARED" if resolved else "LOCK SUMMARY"
+    state = "LOCK SUMMARY CLEARED" if resolved else ("LOCK STORM" if event == "storm" else "LOCK SUMMARY")
     status = "CLEARED" if resolved else "ACTIVE"
-    event_label = {"initial": "INITIAL SUMMARY", "update": "ACTIVE SUMMARY UPDATE", "cleared": "ALL LOCKS CLEARED"}[event]
+    event_label = {"initial": "INITIAL SUMMARY", "update": "ACTIVE SUMMARY UPDATE", "cleared": "ALL LOCKS CLEARED", "storm": "LOCK STORM DETECTED"}[event]
     first_seen = min((alert.first_seen_at for alert in alerts), default=None)
     last_seen = max((alert.last_seen_at for alert in alerts), default=None)
     current_keys = [alert.alert_key for alert in alerts]
@@ -90,6 +90,8 @@ def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys
             message = f"All tracked locks are cleared. Manual kill recorded by {cleared_by} for PID(s): {_pair_text(killed_pids, limit=600)}."
         else:
             message = "All tracked locks are cleared automatically."
+    elif event == "storm":
+        message = f"{active_count} simultaneous locks detected in one check. Action required: review the blocking sessions. This storm alert will not repeat until all locks clear."
     elif active_count == 1:
         message = "1 lock is still active. Action required: review the blocking session."
     else:
@@ -114,7 +116,7 @@ def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys
     )
 
 
-def _query_detail_container(title, alerts, max_items=20):
+def _query_detail_container(title, alerts, max_items=10):
     if not alerts:
         return None
     visible_alerts = list(alerts)[:max_items]

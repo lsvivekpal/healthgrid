@@ -120,28 +120,17 @@ def process_long_queries(instance, activity, config, now):
             LongQueryAlert.objects.filter(pk__in=[alert.pk for alert in new_alerts]).update(alerted_at=now)
 
 
-def process_instance(instance, now=None):
-    now = now or timezone.now()
-    activity, blocking = db.fetch_activity(instance)
+def _upsert_lock_alerts(instance, unique_blocking, threshold, now):
+    """Persist one database snapshot in one transaction.
+
+    A lock storm can contain hundreds of PID pairs. Keeping one transaction
+    for the whole snapshot avoids hundreds of individual commit/fsync cycles,
+    which used to make the embedded web process appear unhealthy under load.
+    """
     seen_keys = set()
-    config = NotificationSettings.load()
-    threshold = config.threshold_seconds
-
-    # PostgreSQL can return several rows for one backend pair. Collapse those
-    # rows before updating state so one real incident produces one alert.
-    unique_blocking = {}
-    for row in blocking:
-        key = lock_key(row)
-        current = unique_blocking.get(key)
-        if current is None or int(row.get("waiting_seconds") or 0) > int(current.get("waiting_seconds") or 0):
-            unique_blocking[key] = row
-
-    for key, row in unique_blocking.items():
-        seen_keys.add(key)
-        with transaction.atomic():
-            # Lock the incident row while deciding whether to notify. This
-            # keeps a manually-run monitor command from racing the embedded
-            # monitor and sending the same event twice.
+    with transaction.atomic():
+        for key, row in unique_blocking.items():
+            seen_keys.add(key)
             alert, created = LockAlert.objects.select_for_update().get_or_create(
                 instance=instance,
                 alert_key=key,
@@ -167,15 +156,32 @@ def process_instance(instance, now=None):
                 alert.waiting_seconds = max(0, int(row.get("waiting_seconds") or alert.waiting_seconds))
                 alert.save(update_fields=["last_seen_at", "blocked_user", "blocking_user", "blocked_query", "blocking_query", "waiting_seconds"])
 
-            wait_age = alert.waiting_seconds
-            if wait_age >= threshold and alert.alerted_at is None:
-                # Mark the incident as eligible for the aggregate summary.
-                # Delivery is handled once below for the whole database.
+            if alert.waiting_seconds >= threshold and alert.alerted_at is None:
                 alert.alerted_at = now
                 alert.save(update_fields=["alerted_at"])
+    return seen_keys
+
+
+def process_instance(instance, now=None):
+    now = now or timezone.now()
+    activity, blocking = db.fetch_activity(instance)
+    config = NotificationSettings.load()
+    threshold = config.threshold_seconds
+
+    # PostgreSQL can return several rows for one backend pair. Collapse those
+    # rows before updating state so one real incident produces one alert.
+    unique_blocking = {}
+    for row in blocking:
+        key = lock_key(row)
+        current = unique_blocking.get(key)
+        if current is None or int(row.get("waiting_seconds") or 0) > int(current.get("waiting_seconds") or 0):
+            unique_blocking[key] = row
+
+    seen_keys = _upsert_lock_alerts(instance, unique_blocking, threshold, now)
 
     active_alerts = LockAlert.objects.filter(instance=instance, resolved_at__isnull=True)
     cleared_alerts = []
+    to_clear = []
     for alert in active_alerts:
         if alert.alert_key in seen_keys:
             continue
@@ -184,7 +190,11 @@ def process_instance(instance, now=None):
             alert.clear_reason = "auto_clear"
         if alert.alerted_at is not None:
             cleared_alerts.append(alert)
-        alert.save(update_fields=["resolved_at", "clear_reason"])
+        to_clear.append(alert)
+    if to_clear:
+        clear_ids = [alert.pk for alert in to_clear]
+        LockAlert.objects.filter(pk__in=clear_ids).update(resolved_at=now)
+        LockAlert.objects.filter(pk__in=clear_ids, clear_reason="").update(clear_reason="auto_clear")
 
     eligible_alerts = list(
         LockAlert.objects.filter(
@@ -202,6 +212,10 @@ def process_instance(instance, now=None):
         previous_keys = sorted(state.last_active_keys or [])
         cleared_keys = sorted(set(previous_keys) - set(current_keys))
         current_fingerprint = summary_fingerprint(eligible_alerts)
+        all_active_alerts = list(
+            LockAlert.objects.filter(instance=instance, resolved_at__isnull=True)
+            .order_by("blocked_pid", "blocking_pid")
+        )
 
         if not lock_notifications_open(config, now):
             # Keep the current set for the next daytime comparison, but clear
@@ -210,6 +224,32 @@ def process_instance(instance, now=None):
             state.last_fingerprint = ""
             state.last_active_keys = current_keys
             state.save(update_fields=["last_fingerprint", "last_active_keys"])
+            return
+
+        storm_threshold = config.lock_storm_threshold
+        if not all_active_alerts:
+            if state.storm_active:
+                state.storm_active = False
+                state.save(update_fields=["storm_active"])
+        elif storm_threshold and len(all_active_alerts) >= storm_threshold:
+            if not state.storm_active:
+                if notify_lock_summary(
+                    instance,
+                    all_active_alerts,
+                    event="storm",
+                    previous_active_keys=previous_keys,
+                    cleared_keys=[],
+                    sent_at=now,
+                ):
+                    state.storm_active = True
+                    state.last_fingerprint = current_fingerprint
+                    state.last_active_keys = current_keys
+                    state.last_sent_at = now
+                    state.save(update_fields=["storm_active", "last_fingerprint", "last_active_keys", "last_sent_at"])
+            return
+        elif state.storm_active:
+            # Suppress ordinary change cards while a previously reported storm
+            # is still active. The dashboard and weekly CSV retain all detail.
             return
 
         if current_fingerprint == state.last_fingerprint:

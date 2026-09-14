@@ -138,6 +138,7 @@ class LockNotificationState(models.Model):
     last_fingerprint = models.CharField(max_length=64, blank=True)
     last_active_keys = models.JSONField(default=list)
     last_sent_at = models.DateTimeField(null=True, blank=True)
+    storm_active = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Lock notification state for {self.instance.name}"
@@ -149,6 +150,10 @@ class NotificationSettings(models.Model):
     channel_webhook_url = models.URLField(max_length=2048, blank=True, help_text="Shared Teams channel Workflow webhook")
     threshold_seconds = models.PositiveIntegerField(default=120)
     interval_seconds = models.PositiveIntegerField(default=30)
+    lock_storm_threshold = models.PositiveIntegerField(
+        default=100,
+        help_text="Send one compact alert when this many active PID pairs are detected; 0 disables it",
+    )
     notification_schedule_enabled = models.BooleanField(
         default=False,
         help_text="Only send lock notifications during the configured IST window",

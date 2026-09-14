@@ -247,6 +247,7 @@ def notification_settings(request):
         try:
             threshold = int(request.POST.get("threshold_seconds", "120"))
             interval = int(request.POST.get("interval_seconds", "30"))
+            lock_storm_threshold = int(request.POST.get("lock_storm_threshold", "100"))
             report_day = int(request.POST.get("weekly_report_day", "0"))
             report_hour = int(request.POST.get("weekly_report_hour", "9"))
             report_retention_days = int(request.POST.get("report_retention_days", "7"))
@@ -269,6 +270,8 @@ def notification_settings(request):
             if (
                 threshold < 1
                 or interval < 1
+                or lock_storm_threshold < 0
+                or lock_storm_threshold > 100000
                 or report_day not in range(7)
                 or report_hour not in range(24)
                 or report_retention_days not in {2, 3, 7}
@@ -278,11 +281,12 @@ def notification_settings(request):
                 or manual_query_threshold < 1
                 or len(manual_query_excluded_users) > 4000
             ):
-                messages.error(request, "Use positive thresholds, different notification start/end times, report retention of 2, 3, or 7 days, resolved retention from 7 to 3650 days, and a valid excluded-user list.")
+                messages.error(request, "Use valid thresholds, a lock-storm threshold from 0 to 100000, different notification start/end times, report retention of 2, 3, or 7 days, resolved retention from 7 to 3650 days, and a valid excluded-user list.")
             else:
                 config.channel_webhook_url = webhook_url
                 config.threshold_seconds = threshold
                 config.interval_seconds = interval
+                config.lock_storm_threshold = lock_storm_threshold
                 config.notification_schedule_enabled = schedule_enabled
                 config.notification_start_time = schedule_start
                 config.notification_end_time = schedule_end
