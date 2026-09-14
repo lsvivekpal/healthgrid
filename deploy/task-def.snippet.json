@@ -1,15 +1,15 @@
 {
-  "family": "rds-dashboard",
+  "family": "healthgrid",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/rds-dashboard-task-role",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/rds-dashboard-execution-role",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/healthgrid-task-role",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/healthgrid-execution-role",
   "containerDefinitions": [
     {
       "name": "web",
-      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/rds-dashboard:latest",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/healthgrid:latest",
       "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
       "environment": [
         { "name": "AWS_REGION", "value": "REGION" },
@@ -24,9 +24,9 @@
         { "name": "DB_SSL_MODE", "value": "require" }
       ],
       "secrets": [
-        { "name": "DJANGO_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/django-secret-key" },
-        { "name": "ENCRYPTION_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/encryption-key" },
-        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:rds-dashboard/database-url" }
+        { "name": "DJANGO_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:healthgrid/django-secret-key" },
+        { "name": "ENCRYPTION_KEY", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:healthgrid/encryption-key" },
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:healthgrid/database-url" }
       ],
       "healthCheck": {
         "command": ["CMD-SHELL", "curl -f http://localhost:8000/healthz || exit 1"],
@@ -37,7 +37,7 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/rds-dashboard",
+          "awslogs-group": "/ecs/healthgrid",
           "awslogs-region": "REGION",
           "awslogs-stream-prefix": "web"
         }

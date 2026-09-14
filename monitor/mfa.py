@@ -43,7 +43,7 @@ def new_enrollment(profile):
 
 def provisioning_uri(user, secret):
     account = user.email or user.get_username()
-    return pyotp.TOTP(secret).provisioning_uri(name=account, issuer_name="RDS Dashboard")
+    return pyotp.TOTP(secret).provisioning_uri(name=account, issuer_name="HealthGrid")
 
 
 def qr_data_uri(value):

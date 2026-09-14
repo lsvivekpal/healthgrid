@@ -1,5 +1,5 @@
 {% extends "monitor/base.html" %}
-{% block title %}Instances &middot; RDS Dashboard{% endblock %}
+{% block title %}Instances &middot; HealthGrid{% endblock %}
 {% block content %}
 <style>
   .instance-heading { min-width:0; flex:1 1 auto; }
@@ -208,9 +208,9 @@
 
   (function loadRefreshPreferences() {
     try {
-      var savedInterval = parseInt(localStorage.getItem('rds-dashboard-refresh-interval'), 10);
+      var savedInterval = parseInt(localStorage.getItem('healthgrid-refresh-interval'), 10);
       if (savedInterval >= 5 && savedInterval <= 3600) INSTANCE_POLL_INTERVAL = savedInterval;
-      instanceAutoRefreshEnabled = localStorage.getItem('rds-dashboard-auto-refresh') !== 'false';
+      instanceAutoRefreshEnabled = localStorage.getItem('healthgrid-auto-refresh') !== 'false';
     } catch (error) {}
     instancePollRemaining = INSTANCE_POLL_INTERVAL;
     var enabled = document.getElementById('list-auto-refresh');
@@ -230,8 +230,8 @@
     instanceAutoRefreshEnabled = enabled ? enabled.checked : true;
     if (interval) interval.value = value;
     try {
-      localStorage.setItem('rds-dashboard-refresh-interval', String(value));
-      localStorage.setItem('rds-dashboard-auto-refresh', String(instanceAutoRefreshEnabled));
+      localStorage.setItem('healthgrid-refresh-interval', String(value));
+      localStorage.setItem('healthgrid-auto-refresh', String(instanceAutoRefreshEnabled));
     } catch (error) {}
   }
 

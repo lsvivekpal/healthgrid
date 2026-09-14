@@ -1,5 +1,5 @@
 {% extends "monitor/base.html" %}
-{% block title %}Notification settings &middot; RDS Dashboard{% endblock %}
+{% block title %}Notification settings &middot; HealthGrid{% endblock %}
 {% block content %}
 <div class="breadcrumb">
   <a href="{% url 'instance-list' %}">All instances</a>
@@ -114,7 +114,7 @@
         </div>
       </div>
       <label for="id_report_base_url" style="margin-top:12px;">Public dashboard URL for large CSV files</label>
-      <input type="url" name="report_base_url" id="id_report_base_url" value="{{ notification_settings.report_base_url }}" placeholder="https://rds-dashboard.example.com" autocomplete="off">
+      <input type="url" name="report_base_url" id="id_report_base_url" value="{{ notification_settings.report_base_url }}" placeholder="https://healthgrid.example.com" autocomplete="off">
       <div class="section-hint" style="margin-top:6px;line-height:1.45;">Recommended in production. It lets Teams/Power Automate download the full report securely during the selected retention period, even when SQL text is too large for an inline webhook payload.</div>
       <div class="form-grid" style="margin-top:12px;">
         <div>

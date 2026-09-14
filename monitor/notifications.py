@@ -95,7 +95,7 @@ def _summary_message(instance, alerts, event, previous_active_keys, cleared_keys
     else:
         message = f"{active_count} locks are still active. Action required: review the blocking sessions."
     return (
-        f"RDS Dashboard: {state}\n"
+        f"HealthGrid: {state}\n"
         f"Status: {status}\n"
         f"Alert event: {event_label}\n"
         f"Database: {instance.name} ({instance.db_identifier})\n"
@@ -142,7 +142,7 @@ def _adaptive_card(message, alerts=None, cleared_alerts=None, report=None):
         if ": " in line:
             key, value = line.split(": ", 1)
             values[key] = value
-    state = values.get("RDS Dashboard", "")
+    state = values.get("HealthGrid", "")
     is_test = state == "TEST NOTIFICATION"
     resolved = values.get("Status") == "CLEARED"
     is_report = state == "WEEKLY LOCK REPORT"
@@ -164,7 +164,7 @@ def _adaptive_card(message, alerts=None, cleared_alerts=None, report=None):
             "style": card_style,
             "bleed": True,
             "items": [
-                {"type": "TextBlock", "text": "RDS Dashboard", "weight": "Bolder", "size": "Small", "color": status_color},
+                {"type": "TextBlock", "text": "HealthGrid", "weight": "Bolder", "size": "Small", "color": status_color},
                 {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Large", "color": status_color, "spacing": "None"},
             ],
         },
@@ -305,7 +305,7 @@ def _report_url(report, report_base_url):
 def _weekly_report_message(*, scope, file_name, row_count, report_url):
     delivery = "Power Automate downloads the signed report URL" if report_url else "Power Automate creates the file from csv_content"
     return (
-        "RDS Dashboard: WEEKLY LOCK REPORT\n"
+        "HealthGrid: WEEKLY LOCK REPORT\n"
         "Status: REPORT READY\n"
         f"Database: {scope}\n"
         "Region: —\n"
@@ -392,7 +392,7 @@ def send_test_notification(webhook_url, destination="Teams"):
     if not webhook_url:
         return False, "No Teams webhook URL is configured."
     message = (
-        "RDS Dashboard: TEST NOTIFICATION\n"
+        "HealthGrid: TEST NOTIFICATION\n"
         f"Destination: {destination}\n"
         "Status: Delivery successful"
     )
@@ -439,7 +439,7 @@ def _long_query_card(instance, alerts, sent_at):
             "style": "attention",
             "bleed": True,
             "items": [
-                {"type": "TextBlock", "text": "RDS Dashboard", "weight": "Bolder", "size": "Small", "color": "Attention"},
+                {"type": "TextBlock", "text": "HealthGrid", "weight": "Bolder", "size": "Small", "color": "Attention"},
                 {"type": "TextBlock", "text": "Long-running manual query detected", "weight": "Bolder", "size": "Large", "color": "Attention", "spacing": "None"},
             ],
         },

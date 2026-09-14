@@ -121,7 +121,7 @@ def get_connection(instance):
             connect_timeout=CONNECT_TIMEOUT_SECONDS,
             sslmode=settings.DB_SSL_MODE if instance.ssl_required else "prefer",
             **({"sslrootcert": settings.DB_SSL_ROOT_CERT} if instance.ssl_required and settings.DB_SSL_ROOT_CERT else {}),
-            application_name="rds-dashboard-control",
+            application_name="healthgrid-control",
             options=(
                 f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS} "
                 f"-c lock_timeout={LOCK_TIMEOUT_MILLISECONDS} "
@@ -274,7 +274,7 @@ def test_connection(host, port, db_name, username, password, ssl_required):
             connect_timeout=CONNECT_TIMEOUT_SECONDS,
             sslmode=settings.DB_SSL_MODE if ssl_required else "prefer",
             **({"sslrootcert": settings.DB_SSL_ROOT_CERT} if ssl_required and settings.DB_SSL_ROOT_CERT else {}),
-            application_name="rds-dashboard-test",
+            application_name="healthgrid-test",
             options=(
                 f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS} "
                 f"-c lock_timeout={LOCK_TIMEOUT_MILLISECONDS} "

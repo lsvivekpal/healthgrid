@@ -1,4 +1,4 @@
-# RDS Dashboard
+# HealthGrid
 
 A Django application for PostgreSQL/RDS lock and session monitoring, controlled backend termination, replication-slot management, Teams notifications, and weekly lock-history reports.
 
@@ -159,13 +159,13 @@ ACTIVITY_CACHE_TTL=10
 Example first deployment behind a reverse proxy on the same host:
 
 ```bash
-docker build -t rds-dashboard:release-001 .
-docker volume create rds-dashboard-data
-docker run --rm --env-file .env.prod -v rds-dashboard-data:/data rds-dashboard:release-001 python manage.py migrate --noinput
-docker run --rm -it --env-file .env.prod -e DISABLE_EMBEDDED_LOCK_MONITOR=1 -v rds-dashboard-data:/data rds-dashboard:release-001 python manage.py createsuperuser
-docker run -d --name rds-dashboard --restart unless-stopped \
-  --env-file .env.prod -v rds-dashboard-data:/data \
-  -p 127.0.0.1:8000:8000 rds-dashboard:release-001 \
+docker build -t healthgrid:release-001 .
+docker volume create healthgrid-data
+docker run --rm --env-file .env.prod -v healthgrid-data:/data healthgrid:release-001 python manage.py migrate --noinput
+docker run --rm -it --env-file .env.prod -e DISABLE_EMBEDDED_LOCK_MONITOR=1 -v healthgrid-data:/data healthgrid:release-001 python manage.py createsuperuser
+docker run -d --name healthgrid --restart unless-stopped \
+  --env-file .env.prod -v healthgrid-data:/data \
+  -p 127.0.0.1:8000:8000 healthgrid:release-001 \
   gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 60
 ```
 
@@ -183,7 +183,7 @@ server {
     server_name dashboard.example.com;
 
     location / {
-        proxy_pass http://awsdashboard:8000;
+        proxy_pass http://healthgrid:8000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -198,7 +198,7 @@ server {
     }
 
     location = /healthz {
-        proxy_pass http://awsdashboard:8000/healthz;
+        proxy_pass http://healthgrid:8000/healthz;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -206,7 +206,7 @@ server {
 }
 ```
 
-The Nginx container and `awsdashboard` service must share a Docker network. Test the Nginx configuration before reload. The ALB health check should use `HTTP /healthz`; it is intentionally unauthenticated and returns only `{"status":"ok"}`.
+The Nginx container and `healthgrid` service must share a Docker network. Test the Nginx configuration before reload. The ALB health check should use `HTTP /healthz`; it is intentionally unauthenticated and returns only `{"status":"ok"}`.
 
 For upgrades, use a new image tag/digest, run `migrate --noinput` with the same database configuration, then update the service through its normal deployment process. Migration `0024_replication_slot_access` is required for operator slot grants. Preserve migration history; do not delete migrations already applied in production.
 
@@ -214,10 +214,10 @@ Do not mount old source over `/app` or stale assets over `/app/staticfiles` in p
 
 ### Multi-platform builds and ECR
 
-If Docker reports that its current driver cannot build multiple platforms, use a `docker-container` builder. If it already exists, run `docker buildx use rds-dashboard-builder` instead of recreating it. See [Docker's multi-platform guidance](https://docs.docker.com/build/building/multi-platform/).
+If Docker reports that its current driver cannot build multiple platforms, use a `docker-container` builder. If it already exists, run `docker buildx use healthgrid-builder` instead of recreating it. See [Docker's multi-platform guidance](https://docs.docker.com/build/building/multi-platform/).
 
 ```bash
-docker buildx create --name rds-dashboard-builder --driver docker-container --use
+docker buildx create --name healthgrid-builder --driver docker-container --use
 docker buildx inspect --bootstrap
 ```
 
@@ -227,10 +227,10 @@ Example using the AWS CLI **default profile**; replace the account ID, repositor
 RDS_ECR_REGISTRY=123456789012.dkr.ecr.ap-south-1.amazonaws.com
 RDS_IMAGE_TAG=release-001
 aws --profile default ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin "$RDS_ECR_REGISTRY"
-docker buildx build --builder rds-dashboard-builder \
+docker buildx build --builder healthgrid-builder \
   --platform linux/amd64,linux/arm64 \
-  -t "$RDS_ECR_REGISTRY/awsdashboard:$RDS_IMAGE_TAG" \
-  -t "$RDS_ECR_REGISTRY/awsdashboard:latest" --push .
+  -t "$RDS_ECR_REGISTRY/healthgrid:$RDS_IMAGE_TAG" \
+  -t "$RDS_ECR_REGISTRY/healthgrid:latest" --push .
 ```
 
 Authentication follows [AWS's ECR login instructions](https://docs.aws.amazon.com/cli/latest/reference/ecr/get-login-password.html). Prefer deploying the release tag/digest. A push does not update running services automatically. Multi-platform `--push` does not load a local runnable image; use `docker compose build web` for local testing.
@@ -285,7 +285,7 @@ GRANT pg_signal_backend TO db_lock_admin;
 
 Slot management needs separate PostgreSQL/RDS privileges; a dashboard grant does not grant database-level replication rights. Have your DBA validate [replication-management permissions](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-REPLICATION). Do not broadly grant superuser rights simply to make a UI action work.
 
-Control connections use application name `rds-dashboard-control`, with a 5-second connect timeout, 8-second statement timeout, 2-second lock timeout, and 10-second idle-in-transaction timeout.
+Control connections use application name `healthgrid-control`, with a 5-second connect timeout, 8-second statement timeout, 2-second lock timeout, and 10-second idle-in-transaction timeout.
 
 A blocked connection belonging to `db_lock_admin` does not necessarily block every new connection using that username. The dashboard opens independent connections; access still depends on network reachability, connection capacity, and DB privileges. It does not automatically kill its own PIDs to recover access.
 
@@ -427,7 +427,7 @@ There is no current “repeat every” or “checks observed” setting; older m
 
 Enable **Long-running manual queries**, choose a duration, and enter comma-separated application usernames to exclude.
 
-This checks active queries from any non-excluded user, **not only DBeaver/TablePlus**. Application names do not prove human activity. Username exclusions are case-insensitive; `rds-dashboard-control` application connections are excluded automatically.
+This checks active queries from any non-excluded user, **not only DBeaver/TablePlus**. Application names do not prove human activity. Username exclusions are case-insensitive; `healthgrid-control` application connections are excluded automatically.
 
 Cards include database, user, PID, application/client details, SQL, duration, and IST time. PID/user/query-start/SQL identifies an execution: unchanged executions alert once, while a new execution can alert again. Finished/changed executions are marked resolved; there is no separate long-query cleared card.
 
@@ -471,7 +471,7 @@ For weekly reports:
 2. Otherwise use **Create file**, with name `triggerBody()?['file_name']` and content `triggerBody()?['csv_content']`.
 3. Create a suitably restricted share link, then post the card and link to Teams.
 
-The supplied [workflow exports](flow/) use OneDrive for Business and default folder `/RDS Dashboard/Weekly Reports/`. Create/select the folder and rebind connections, Teams destinations, and sharing settings during import. Exports are environment-specific examples, not portable credentials. Verify connector availability/licensing in your Microsoft tenant; this repository does not guarantee a premium-free flow.
+The supplied [workflow exports](flow/) use OneDrive for Business and default folder `/HealthGrid/Weekly Reports/`. Create/select the folder and rebind connections, Teams destinations, and sharing settings during import. Exports are environment-specific examples, not portable credentials. Verify connector availability/licensing in your Microsoft tenant; this repository does not guarantee a premium-free flow.
 
 ### Inline CSV versus signed URL
 
@@ -633,9 +633,9 @@ docker compose exec -T web python manage.py test monitor --noinput
 Isolated production-mode tests against a built image without local data mounts:
 
 ```bash
-docker build -t rds-dashboard:test .
+docker build -t healthgrid:test .
 docker run --rm -e DJANGO_DEBUG=false -e DISABLE_EMBEDDED_LOCK_MONITOR=1 \
-  rds-dashboard:test python manage.py test monitor --noinput
+  healthgrid:test python manage.py test monitor --noinput
 ```
 
 Tests cover connection/parsing behaviour, lock actions, MFA, Administrator/API restrictions, operator grants/revocation, guarded generic termination, notifications/schedules, reports/retention, and static files with debug disabled. Termination calls in automated tests are mocked; a passing suite does not authorize destructive production testing.

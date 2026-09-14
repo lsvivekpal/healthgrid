@@ -77,7 +77,7 @@ def process_long_queries(instance, activity, config, now):
         application_name = str(row.get("application_name") or "").strip()
         if row.get("state") != "active" or not username or username.casefold() in excluded_users:
             continue
-        if application_name.casefold() == "rds-dashboard-control":
+        if application_name.casefold() == "healthgrid-control":
             continue
         if int(row.get("duration_seconds") or 0) < config.manual_query_threshold_seconds:
             continue

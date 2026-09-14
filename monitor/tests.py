@@ -66,7 +66,7 @@ class BlockingQueryParseTests(TestCase):
         kwargs = connect.call_args.kwargs
         self.assertEqual(kwargs["user"], "db_lock_admin")
         self.assertEqual(kwargs["password"], "controlpass")
-        self.assertEqual(kwargs["application_name"], "rds-dashboard-control")
+        self.assertEqual(kwargs["application_name"], "healthgrid-control")
         self.assertIn("statement_timeout=8000", kwargs["options"])
 
 
