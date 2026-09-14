@@ -12,7 +12,6 @@
       "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/healthgrid:latest",
       "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
       "environment": [
-        { "name": "AWS_REGION", "value": "REGION" },
         { "name": "DJANGO_DEBUG", "value": "false" },
         { "name": "DJANGO_USE_HTTPS", "value": "true" },
         { "name": "DJANGO_ALLOW_HTTP", "value": "false" },
