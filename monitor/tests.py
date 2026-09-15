@@ -286,7 +286,7 @@ class LockMonitorTests(TestCase):
 
         self.assertEqual(notify.call_count, 0)
 
-    def test_notifies_active_update_when_lock_details_change(self):
+    def test_does_not_repeat_when_query_details_change_for_same_pid_pair(self):
         instance = make_instance()
         now = timezone.now()
         row = {
@@ -309,8 +309,7 @@ class LockMonitorTests(TestCase):
              patch("monitor.management.commands.monitor_locks.notify_lock_summary", return_value=True) as notify:
             process_instance(instance, now=now + timedelta(seconds=30))
 
-        notify.assert_called_once()
-        self.assertEqual(notify.call_args.kwargs["event"], "update")
+        notify.assert_not_called()
 
     def test_summarizes_partial_clears_then_sends_one_final_clear(self):
         instance = make_instance()

@@ -57,7 +57,7 @@
       <input type="number" name="resolved_alert_retention_days" id="id_resolved_alert_retention_days" value="{{ notification_settings.resolved_alert_retention_days }}" min="7" max="3650" required>
     </div>
     <div class="section-hint" style="margin-top:10px;line-height:1.45;">
-      Notifications are summarized per database. The first card lists active PID pairs, updates are sent only when the lock set or lock details change, and one final card is sent when all tracked locks clear. Unchanged locks do not generate heartbeat duplicates. Active locks are never removed; resolved records are cleaned daily after the retention period.
+      Notifications are summarized per database. The first card lists active PID pairs, and the same PID pair is not posted again while it remains blocked. A new or cleared PID pair can produce a summary, and one final card is sent when all tracked locks clear. Unchanged locks do not generate heartbeat duplicates. Active locks are never removed; resolved records are cleaned daily after the retention period.
     </div>
 
     <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">

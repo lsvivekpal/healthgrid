@@ -408,7 +408,7 @@ Eligibility uses `waiting_seconds`, calculated from the blocked query's `query_s
 Notifications are aggregated per registration:
 
 1. The first eligible locks produce an initial summary.
-2. Changes in eligible PID pairs, usernames, or SQL produce an update.
+2. A new or cleared eligible PID pair produces an update; query-text/user changes for the same active PID pair do not.
 3. If 30 of 100 eligible locks clear, the next update describes the remaining 70 and cleared pairs—not 30 individual cleared cards.
 4. A final clear is sent when no alert-eligible tracked pairs remain. Below-threshold locks can still exist outside the summary.
 

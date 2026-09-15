@@ -35,17 +35,10 @@ def lock_fingerprint(row):
 
 
 def summary_fingerprint(alerts):
-    values = sorted(
-        f"{alert.alert_key}:{lock_fingerprint({
-            'blocked_pid': alert.blocked_pid,
-            'blocking_pid': alert.blocking_pid,
-            'blocked_user': alert.blocked_user,
-            'blocking_user': alert.blocking_user,
-            'blocked_query': alert.blocked_query,
-            'blocking_query': alert.blocking_query,
-        })}"
-        for alert in alerts
-    )
+    # PID pairs are the incident identity. Query text can legitimately change
+    # while the same sessions remain blocked; that must not create heartbeat
+    # cards for the same lock.
+    values = sorted(alert.alert_key for alert in alerts)
     return hashlib.sha256("\0".join(values).encode("utf-8")).hexdigest()
 
 
@@ -233,6 +226,8 @@ def process_instance(instance, now=None):
                 state.save(update_fields=["storm_active"])
         elif storm_threshold and len(all_active_alerts) >= storm_threshold:
             if not state.storm_active:
+                storm_keys = sorted(alert.alert_key for alert in all_active_alerts)
+                storm_fingerprint = summary_fingerprint(all_active_alerts)
                 if notify_lock_summary(
                     instance,
                     all_active_alerts,
@@ -242,8 +237,8 @@ def process_instance(instance, now=None):
                     sent_at=now,
                 ):
                     state.storm_active = True
-                    state.last_fingerprint = current_fingerprint
-                    state.last_active_keys = current_keys
+                    state.last_fingerprint = storm_fingerprint
+                    state.last_active_keys = storm_keys
                     state.last_sent_at = now
                     state.save(update_fields=["storm_active", "last_fingerprint", "last_active_keys", "last_sent_at"])
             return

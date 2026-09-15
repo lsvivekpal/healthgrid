@@ -13,7 +13,7 @@ from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError
 from django.db.models import Q
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -87,16 +87,29 @@ def _with_human_durations(rows, field):
 
 
 def _log_audit(instance, action, user, *, pid=None, query="", result="success", detail=""):
-    AuditLog.objects.create(
-        instance=instance,
-        instance_name=instance.name if instance else "",
-        action=action,
-        target_pid=pid,
-        target_query=query,
-        performed_by=user,
-        result=result,
-        detail=detail,
-    )
+    try:
+        AuditLog.objects.create(
+            instance=instance,
+            instance_name=instance.name if instance else "",
+            action=action,
+            target_pid=pid,
+            target_query=query,
+            performed_by=user,
+            result=result,
+            detail=detail,
+        )
+    except DatabaseError:
+        # A successful target-DB kill must not become an HTTP 500 because the
+        # application DB is temporarily busy during a lock burst. Keep the
+        # failure in the container log and let the operator see the success.
+        logger.exception("Could not write audit log for %s", action)
+
+
+def _safe_mark_manual_kill(instance, pids, user):
+    try:
+        _mark_manual_kill(instance, pids, user)
+    except DatabaseError:
+        logger.exception("Could not mark manually killed lock PIDs for %s", instance)
 
 
 def _mark_manual_kill(instance, pids, user):
@@ -658,7 +671,7 @@ def _kill_session_impl(request, pk, *, lock_only=False):
             detail="" if terminated else "pid was not running or is a protected replication-slot backend",
         )
         if terminated:
-            _mark_manual_kill(instance, [pid], request.user)
+            _safe_mark_manual_kill(instance, [pid], request.user)
             messages.success(request, f"Terminated backend pid {pid}.")
         else:
             messages.warning(request, f"pid {pid} was not running or is a replication-slot backend you do not have permission to terminate.")
@@ -725,7 +738,7 @@ def _kill_chain_impl(request, pk, *, lock_only=False, require_mfa=False):
             detail=f"pids={pids} terminated={terminated} not_running={not_running}",
         )
         if terminated:
-            _mark_manual_kill(instance, terminated, request.user)
+            _safe_mark_manual_kill(instance, terminated, request.user)
             messages.success(request, f"Terminated {len(terminated)} pid(s): {terminated}.")
         if not_running:
             messages.warning(request, f"Not running or protected replication-slot backends: {not_running}.")
