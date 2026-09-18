@@ -12,6 +12,7 @@ services:
     environment:
       DJANGO_DEBUG: "true"
       DJANGO_SECRET_KEY: "local-dev-secret"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
     depends_on:
       - target-db
 
