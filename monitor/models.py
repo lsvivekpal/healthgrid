@@ -61,6 +61,29 @@ class RDSInstance(models.Model):
         return crypto.decrypt_password(self.control_password_encrypted)
 
 
+class UserInstanceAccess(models.Model):
+    ROLE_CHOICES = (("readonly", "Read-only"), ("operator", "Operator"))
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="instance_access_grants")
+    instance = models.ForeignKey(RDSInstance, on_delete=models.CASCADE, related_name="user_access_grants")
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "instance"], name="unique_user_instance_access")]
+        ordering = ["instance__name"]
+
+    def __str__(self):
+        return f"{self.user} → {self.instance} ({self.role})"
+
+
+class UserInstanceAccessScope(models.Model):
+    """Marks that an account uses explicit per-instance access control."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="instance_access_scope")
+    configured_at = models.DateTimeField(auto_now=True)
+
+
 class AuditLog(models.Model):
     ACTION_CHOICES = [
         ("kill_session", "Kill session"),

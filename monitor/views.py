@@ -25,9 +25,9 @@ from rest_framework.exceptions import PermissionDenied as APIPermissionDenied
 
 from . import db
 from .mfa import require_mfa_for_action
-from .models import AuditLog, DashboardLink, LockAlert, LockReport, NotificationSettings, RDSInstance, ReplicationSlotAccess
+from .models import AuditLog, DashboardLink, LockAlert, LockReport, NotificationSettings, RDSInstance, ReplicationSlotAccess, UserInstanceAccess, UserInstanceAccessScope
 from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
-from .permissions import IsStaffOrReadOnly, can_manage_replication_slot
+from .permissions import IsStaffOrReadOnly, accessible_instances, can_manage_replication_slot, can_operate_instance, can_view_instance
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 def _require_staff(request):
     if not request.user.is_staff:
         raise PermissionDenied("Staff permission required for this action.")
+
+
+def _require_instance_access(request, instance, *, write=False):
+    if not can_view_instance(request.user, instance):
+        raise PermissionDenied("You do not have access to this database instance.")
+    if write and not can_operate_instance(request.user, instance):
+        raise PermissionDenied("Operator access is required for this database instance.")
 
 
 def _require_administrator(request):
@@ -143,9 +150,11 @@ def _require_action_mfa(request, instance, action, detail="", *, require_code=Fa
 
 
 class RDSInstanceViewSet(viewsets.ModelViewSet):
-    queryset = RDSInstance.objects.all()
     serializer_class = RDSInstanceSerializer
     permission_classes = [IsStaffOrReadOnly]
+
+    def get_queryset(self):
+        return accessible_instances(self.request.user)
 
     def perform_create(self, serializer):
         instance = serializer.save(added_by=self.request.user)
@@ -177,7 +186,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 @login_required
 def instance_list(request):
-    instances = RDSInstance.objects.filter(is_active=True)
+    instances = accessible_instances(request.user)
     links = DashboardLink.objects.filter(is_active=True)
     return render(request, "monitor/instance_list.html", {"instances": instances, "dashboard_links": links})
 
@@ -336,6 +345,7 @@ def user_management(request):
     """Administrator-only account creation and per-operator slot grants."""
     _require_administrator(request)
     User = get_user_model()
+    active_instances = list(RDSInstance.objects.filter(is_active=True))
     if request.method == "POST":
         can_drop = request.POST.get("can_drop_slots") == "1"
         can_terminate = request.POST.get("can_terminate_slots") == "1"
@@ -351,6 +361,27 @@ def user_management(request):
                     raise PermissionDenied("Replication-slot grants can only be changed for operators.")
                 _save_slot_access(request, target, can_drop, can_terminate)
             messages.success(request, f"Updated replication-slot permissions for '{target.username}'.")
+            return redirect("user-management")
+        if action == "update_instance_access":
+            try:
+                target_id = int(request.POST.get("user_id", ""))
+            except (TypeError, ValueError):
+                raise PermissionDenied("A valid user is required.")
+            target = get_object_or_404(User.objects, pk=target_id)
+            if target.is_superuser:
+                raise PermissionDenied("Administrators already have access to every instance.")
+            grants = []
+            for instance in RDSInstance.objects.filter(is_active=True):
+                role_value = request.POST.get(f"instance_role_{instance.pk}", "")
+                if role_value in {"readonly", "operator"}:
+                    if role_value == "operator" and not target.is_staff:
+                        raise PermissionDenied("Only operator accounts can receive operator instance access.")
+                    grants.append(UserInstanceAccess(user=target, instance=instance, role=role_value))
+            with transaction.atomic():
+                UserInstanceAccess.objects.filter(user=target).delete()
+                UserInstanceAccess.objects.bulk_create(grants)
+                UserInstanceAccessScope.objects.get_or_create(user=target)
+            messages.success(request, f"Updated instance access for '{target.username}'.")
             return redirect("user-management")
         if action != "create_user":
             raise PermissionDenied("Unknown user-management action.")
@@ -370,13 +401,42 @@ def user_management(request):
             except ValidationError as exc:
                 messages.error(request, " ".join(exc.messages))
             else:
-                with transaction.atomic():
-                    user = User.objects.create_user(username=username, email=email, password=password, is_staff=role == "operator")
-                    if role == "operator" and (can_drop or can_terminate):
-                        _save_slot_access(request, user, can_drop, can_terminate)
-                messages.success(request, f"Created {role} user '{username}'. They will enroll their own authenticator on first login.")
-                return redirect("user-management")
-    return render(request, "monitor/user_management.html", {"users": User.objects.select_related("replication_slot_access", "mfa_profile").order_by("username")})
+                grant_specs = []
+                invalid_grant = False
+                for instance in active_instances:
+                    instance_role = request.POST.get(f"new_instance_role_{instance.pk}", "")
+                    if instance_role in {"readonly", "operator"}:
+                        if instance_role == "operator" and role != "operator":
+                            invalid_grant = True
+                            break
+                        grant_specs.append((instance, instance_role))
+                if invalid_grant:
+                    messages.error(request, "Read-only accounts cannot receive operator instance access.")
+                else:
+                    with transaction.atomic():
+                        user = User.objects.create_user(username=username, email=email, password=password, is_staff=role == "operator")
+                        UserInstanceAccessScope.objects.create(user=user)
+                        if role == "operator" and (can_drop or can_terminate):
+                            _save_slot_access(request, user, can_drop, can_terminate)
+                        UserInstanceAccess.objects.bulk_create([
+                            UserInstanceAccess(user=user, instance=instance, role=instance_role)
+                            for instance, instance_role in grant_specs
+                        ])
+                    messages.success(request, f"Created {role} user '{username}'. They will enroll their own authenticator on first login.")
+                    return redirect("user-management")
+    users = list(User.objects.select_related("replication_slot_access", "mfa_profile").order_by("username"))
+    grants = UserInstanceAccess.objects.select_related("instance").filter(user__in=users)
+    access_map = {(grant.user_id, grant.instance_id): grant.role for grant in grants}
+    for account in users:
+        account.instance_access_rows = [
+            {"instance": instance, "role": access_map.get((account.pk, instance.pk), "")}
+            for instance in active_instances
+        ]
+    return render(request, "monitor/user_management.html", {
+        "users": users,
+        "access_instances": active_instances,
+        "instance_access_map": access_map,
+    })
 
 
 @login_required
@@ -428,7 +488,8 @@ def download_weekly_report(request, token):
 @login_required
 def instance_card_partial(request, pk):
     instance = get_object_or_404(RDSInstance, pk=pk)
-    ctx = {"instance": instance}
+    _require_instance_access(request, instance)
+    ctx = {"instance": instance, "can_operate_instance": can_operate_instance(request.user, instance)}
     try:
         activity, blocking = db.fetch_activity(instance)
         ctx.update(reachable=True, session_count=len(activity), blocked_count=len(blocking))
@@ -440,17 +501,19 @@ def instance_card_partial(request, pk):
 @login_required
 def instance_detail(request, pk):
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
     audit_logs = instance.audit_logs.all()[:25]
     return render(
         request,
         "monitor/instance_detail.html",
-        {"instance": instance, "audit_logs": audit_logs},
+        {"instance": instance, "audit_logs": audit_logs, "can_operate_instance": can_operate_instance(request.user, instance)},
     )
 
 
 @login_required
 def activity_table_partial(request, pk):
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
     cache_key = f"activity:{instance.pk}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -484,7 +547,8 @@ def activity_table_partial(request, pk):
             "conn_pct": conn_pct,
             "top_tables": top_tables,
             "error": error,
-            "is_staff": request.user.is_staff,
+            "is_staff": can_operate_instance(request.user, instance),
+            "can_operate_instance": can_operate_instance(request.user, instance),
         },
     )
 
@@ -492,6 +556,7 @@ def activity_table_partial(request, pk):
 @login_required
 def replication_slots_partial(request, pk):
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
     cache_key = f"repslots:{instance.pk}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -507,8 +572,8 @@ def replication_slots_partial(request, pk):
         request,
         "monitor/partials/replication_slots.html",
         {"instance": instance, "slots": slots, "error": error,
-         "can_drop_slots": can_manage_replication_slot(request.user, "drop"),
-         "can_terminate_slots": can_manage_replication_slot(request.user, "terminate")},
+         "can_drop_slots": can_operate_instance(request.user, instance) and can_manage_replication_slot(request.user, "drop"),
+         "can_terminate_slots": can_operate_instance(request.user, instance) and can_manage_replication_slot(request.user, "terminate")},
     )
 
 
@@ -518,6 +583,7 @@ def kill_replication_slot(request, pk):
     """Terminate the walsender backend behind a slot — a prerequisite for dropping it."""
     _require_slot_permission(request, "terminate")
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
     slot_name = request.POST.get("slot_name", "")
 
     try:
@@ -546,6 +612,7 @@ def drop_replication_slot(request, pk):
     it will need to resync from scratch. Fails if the slot is still active."""
     _require_slot_permission(request, "drop")
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
     slot_name = request.POST.get("slot_name", "")
     if not _require_action_mfa(request, instance, "drop_replication_slot", detail=slot_name, require_code=True):
         return redirect("instance-detail", pk=instance.pk)
@@ -574,6 +641,7 @@ def download_locks(request, pk):
     """CSV of current blocked/blocking queries, full untruncated text — for
     saving a record of what's about to be killed before you kill it."""
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
     try:
         _activity, blocking = db.fetch_activity(instance)
     except db.ConnectionError as exc:
@@ -605,6 +673,7 @@ def download_sessions(request, pk):
     """CSV of current sessions (active + idle-in-transaction), full untruncated
     query text — same convenience as the locks CSV download."""
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
     try:
         activity, _blocking = db.fetch_activity(instance)
     except db.ConnectionError as exc:
@@ -641,6 +710,7 @@ def _current_lock_pids(instance):
 def _kill_session_impl(request, pk, *, lock_only=False):
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_staff(request)
+    _require_instance_access(request, instance, write=True)
 
     try:
         pid = int(request.POST["pid"])
@@ -701,6 +771,7 @@ def _kill_chain_impl(request, pk, *, lock_only=False, require_mfa=False):
     """Kill selected PIDs, with an optional validated lock scope."""
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_staff(request)
+    _require_instance_access(request, instance, write=True)
 
     try:
         pids = [int(p) for p in request.POST.getlist("pid")]
@@ -800,6 +871,7 @@ def add_instance(request):
     duplicate_pk = request.GET.get("duplicate")
     if duplicate_pk:
         source = get_object_or_404(RDSInstance, pk=duplicate_pk)
+        _require_instance_access(request, source, write=True)
         prefill = {
             "region": source.region,
             "host": source.host,
@@ -836,6 +908,7 @@ def test_connection(request):
 def test_control_connection(request, pk):
     _require_staff(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
     try:
         conn = db.get_connection(instance)
         conn.close()
@@ -850,6 +923,7 @@ def test_control_connection(request, pk):
 def rename_instance(request, pk):
     _require_staff(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
     new_name = request.POST.get("name", "").strip()
     if not new_name:
         messages.error(request, "Name cannot be empty.")
@@ -868,6 +942,7 @@ def rename_instance(request, pk):
 def update_owner_webhook(request, pk):
     _require_staff(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
     webhook_url = request.POST.get("owner_teams_webhook_url", "").strip()
     if len(webhook_url) > 2048:
         messages.error(request, "The Teams webhook URL must be 2048 characters or fewer.")
@@ -890,6 +965,7 @@ def update_owner_webhook(request, pk):
 def update_control_credentials(request, pk):
     _require_staff(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
     control_username = request.POST.get("control_username", "").strip()
     control_password = request.POST.get("control_password", "")
     if control_username and not control_password:
@@ -911,6 +987,7 @@ def update_control_credentials(request, pk):
 def remove_instance(request, pk):
     _require_administrator(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
     if not _require_action_mfa(request, instance, "remove_instance", detail=instance.db_identifier, require_code=True):
         return redirect("instance-detail", pk=instance.pk)
     _log_audit(instance, "remove_instance", request.user, detail=instance.db_identifier)

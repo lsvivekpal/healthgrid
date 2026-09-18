@@ -325,11 +325,11 @@ Administrator means an active Django superuser with staff access—not a usernam
 
 | Capability | Administrator | Operator | Read-only |
 | --- | --- | --- | --- |
-| View dashboard/locks/sessions/slots/audits and export CSV | Yes | Yes | Yes |
-| Add/duplicate/rename instances; edit credentials/webhooks | Yes | Yes | No |
+| View dashboard/locks/sessions/slots/audits and export CSV | All instances | Assigned instances | Assigned instances |
+| Add/duplicate/rename instances; edit credentials/webhooks | Yes | Yes, assigned instances | No |
 | Configure notifications; send tests/manual reports | Yes | Yes | No |
-| Individual lock kill | Yes | Yes | No |
-| Live-session and bulk/chain kills | Yes, MFA | Yes, MFA | No |
+| Individual lock kill | Yes | Yes, assigned instances | No |
+| Live-session and bulk/chain kills | Yes, MFA | Yes, MFA, assigned instances | No |
 | Terminate slot backend | Yes | Explicit terminate grant | No |
 | Drop slot | Fresh MFA | Explicit drop grant + fresh MFA | No |
 | Remove instance | Fresh MFA | No | No |
@@ -342,16 +342,17 @@ Application authorization never overrides the connected PostgreSQL role's privil
 As Administrator, open account menu → **User management**:
 
 1. Create an Operator or Read-only account with a temporary password. Optional email is contact information, not a Teams destination.
-2. Optionally grant an operator **Terminate slot backend** and/or **Drop slot**.
-3. For existing operators, change the checkboxes in the user table and select **Save permissions**.
+2. In **Instance access**, choose **Read-only** or **Operator** for each instance. **No access** leaves that instance hidden from the user.
+3. Optionally grant an operator **Terminate slot backend** and/or **Drop slot**.
+4. For existing users, use the **Instance access** controls in the user table and select **Save access**. The selected role applies only to those instances.
 
-Both grants default to off, are independent, and apply to **all registered instances**. Drop permission does not include termination; an active slot may require an independently authorized termination first. Revocation is enforced on subsequent requests. Grant changes are audited. Read-only/inactive users cannot exercise grants even if records exist.
+Both grants default to off and are independent. Drop permission does not include termination; an active slot may require an independently authorized termination first. Revocation is enforced on subsequent requests. Grant changes are audited. Read-only/inactive users cannot exercise grants even if records exist.
 
-The custom user page creates accounts and manages slot grants; it is not a complete account-lifecycle or per-database-access console. There is no shared multi-device Administrator MFA configuration: use separate accounts/devices.
+The custom user page creates accounts and manages slot grants plus per-instance access. Administrators can view all active instances. Operator and Read-only users see only explicitly assigned instances; only Operator assignments expose instance controls. Accounts created before per-instance access was introduced retain access to all active instances until an Administrator saves an explicit instance-access assignment for them. There is no shared multi-device Administrator MFA configuration: use separate accounts/devices.
 
 ### Authenticator enrollment and action checks
 
-First password login directs users to **Authenticator security**. Scan the QR code or enter the setup key in Google Authenticator or another compatible TOTP app, save the recovery codes, and confirm enrollment. Once enabled, subsequent normal logins require password plus authenticator/recovery verification.
+First password login directs users to **Authenticator security**. Scan the QR code or enter the setup key in Google Authenticator or another compatible TOTP app, save the recovery codes, and confirm enrollment. After the first successful enrollment, the user is returned to the instance dashboard. Once enabled, subsequent normal logins require password plus authenticator/recovery verification.
 
 The normal reset UI requests a current code before enrolling a replacement device. Recovery codes are one-time and hashed; MFA secrets and stored database passwords are encrypted with `ENCRYPTION_KEY`.
 

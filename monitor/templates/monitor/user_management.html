@@ -4,6 +4,7 @@
 <div class="breadcrumb">
   <a href="{% url 'instance-list' %}">All instances</a><span style="color:var(--text-faint);">/</span><span style="color:var(--text);">Users</span>
 </div>
+<div style="display:flex;justify-content:flex-end;margin:-4px 0 10px;"><a class="btn btn-primary btn-sm" href="{% url 'instance-list' %}">← Back to dashboard</a></div>
 <div class="card settings-card" style="max-width:780px;">
   <div class="card-header">
     <div>
@@ -26,13 +27,27 @@
       <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="can_drop_slots" value="1">Drop slot (MFA required)</label>
       <p class="section-hint" style="margin:8px 0 0;">Disabled by default. These independent grants apply to all instances. Read-only accounts cannot receive them.</p>
     </fieldset>
+    <fieldset style="margin:18px 0 0;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);">
+      <legend style="font-size:13px;font-weight:600;">Instance access</legend>
+      <div class="section-hint" style="margin-bottom:10px;">Select only the databases this user should see. Operator access enables kill actions for that instance; read-only access only permits viewing.</div>
+      {% for monitored_instance in access_instances %}
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;">
+        <label for="new-instance-role-{{ monitored_instance.pk }}" style="margin:0;min-width:0;overflow-wrap:anywhere;">{{ monitored_instance.name }} <span class="section-hint">({{ monitored_instance.db_identifier }})</span></label>
+        <select id="new-instance-role-{{ monitored_instance.pk }}" name="new_instance_role_{{ monitored_instance.pk }}" style="width:140px;flex:0 0 140px;">
+          <option value="">No access</option>
+          <option value="readonly">Read-only</option>
+          <option value="operator">Operator</option>
+        </select>
+      </div>
+      {% empty %}<div class="section-hint">Add an instance first to assign access.</div>{% endfor %}
+    </fieldset>
     <button class="btn btn-primary" type="submit" style="margin-top:16px;">Create user</button>
   </form>
 </div>
 
 <div class="card table-scroll settings-card" style="max-width:1040px;padding:0;margin-top:16px;">
   <table class="responsive-table">
-    <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th><th>Replication permissions</th></tr></thead>
+    <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th><th>Instance access</th><th>Replication permissions</th></tr></thead>
     <tbody>
       {% for account in users %}
       <tr>
@@ -41,6 +56,28 @@
         <td data-label="Role">{% if account.is_superuser %}Administrator{% elif account.is_staff %}Operator{% else %}Read-only{% endif %}</td>
         <td data-label="Status">{% if account.is_active %}<span class="badge badge-ok">active</span>{% else %}<span class="badge badge-muted">disabled</span>{% endif %}</td>
         <td data-label="MFA">{% if account.mfa_profile.enabled %}<span class="badge badge-ok">enabled</span>{% else %}<span class="badge badge-warn">pending</span>{% endif %}</td>
+        <td data-label="Instance access">
+          {% if account.is_superuser %}
+            <span class="badge badge-ok">All instances</span>
+          {% else %}
+            <form method="post" style="display:grid;gap:8px;min-width:260px;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="update_instance_access">
+              <input type="hidden" name="user_id" value="{{ account.pk }}">
+              {% for access_row in account.instance_access_rows %}
+              <label for="access-{{ account.pk }}-{{ access_row.instance.pk }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;font-size:12px;">
+                <span style="min-width:0;overflow-wrap:anywhere;">{{ access_row.instance.name }}</span>
+                <select id="access-{{ account.pk }}-{{ access_row.instance.pk }}" name="instance_role_{{ access_row.instance.pk }}" style="width:115px;flex:0 0 115px;">
+                  <option value="" {% if not access_row.role %}selected{% endif %}>No access</option>
+                  <option value="readonly" {% if access_row.role == "readonly" %}selected{% endif %}>Read-only</option>
+                  {% if account.is_staff %}<option value="operator" {% if access_row.role == "operator" %}selected{% endif %}>Operator</option>{% endif %}
+                </select>
+              </label>
+              {% empty %}<span class="section-hint">No active instances.</span>{% endfor %}
+              <button class="btn btn-ghost btn-sm" type="submit">Save instance access</button>
+            </form>
+          {% endif %}
+        </td>
         <td data-label="Replication permissions">
           {% if account.is_superuser %}
             <span class="badge badge-ok">Full access</span>
@@ -58,7 +95,7 @@
           {% endif %}
         </td>
       </tr>
-      {% empty %}<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-faint);">No users found.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-faint);">No users found.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>

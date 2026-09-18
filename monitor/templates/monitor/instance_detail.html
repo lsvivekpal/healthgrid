@@ -17,11 +17,11 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);flex-shrink:0;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
         <h2 style="margin:0;">{{ instance.name }}</h2>
         <span id="status-badge" class="badge badge-muted">checking…</span>
-        {% if user.is_staff %}
+        {% if can_operate_instance %}
         <a href="#" onclick="document.getElementById('name-display').style.display='none';document.getElementById('name-edit').style.display='flex';document.getElementById('id_rename').focus();return false;" style="font-size:12px;color:var(--text-faint);">rename</a>
         {% endif %}
       </div>
-      {% if user.is_staff %}
+      {% if can_operate_instance %}
       <form id="name-edit" method="post" action="{% url 'instance-rename' instance.pk %}" style="display:none;align-items:center;gap:8px;margin:6px 0 4px;">
         {% csrf_token %}
         <input type="text" name="name" id="id_rename" value="{{ instance.name }}" required style="width:auto;font-size:16px;padding:6px 10px;">
@@ -44,7 +44,7 @@
       </div>
     </div>
   </div>
-  {% if user.is_staff %}
+  {% if can_operate_instance %}
     <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
       <a class="btn btn-ghost btn-sm" href="{% url 'instance-add' %}?duplicate={{ instance.pk }}">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -156,7 +156,7 @@
   </div>
 </div>
 
-{% if user.is_staff %}
+{% if can_operate_instance %}
 <details class="card action-disclosure" style="margin-top:12px;">
   <summary class="card-title" style="font-size:13.5px;">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--danger-dot);"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>

@@ -144,7 +144,7 @@ def mfa_setup(request):
         elif not profile.enabled:
             if action == "confirm" and confirm_enrollment(profile, request.POST.get("code", "")):
                 messages.success(request, "Google Authenticator MFA is enabled for your account.")
-                return redirect("mfa-setup")
+                return redirect("instance-list")
             error = "Enter the 6-digit code shown by your authenticator app to confirm setup."
 
     if not profile.enabled and (not profile.secret_encrypted or not profile.pending_backup_codes_encrypted):
