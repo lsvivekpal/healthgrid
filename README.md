@@ -39,6 +39,7 @@ Instances are registered manually. The app connects directly to PostgreSQL; it d
 - Responsive forms/tables, mobile session sorting, light/dark themes, accessible confirmation dialogs, and persistent error messages.
 - Centralized **Other dashboards** registry: Administrators maintain approved HTTP(S) links, and authenticated users open them safely in new browser tabs.
 - Audit history for control actions, protected-action MFA failures, and operator replication-permission changes.
+- Installable Progressive Web App (PWA) with a home-screen/app-launcher shortcut for mobile access.
 
 ## Architecture
 
@@ -365,6 +366,10 @@ Current action rules:
 - Django admin instance deletion, including bulk deletion, is disabled to prevent bypassing removal MFA.
 
 Production MFA onboarding is enforced by middleware when `DJANGO_MFA_REQUIRED=true`. Login and MFA failures are throttled for 15 minutes after repeated failures; use a shared cache such as Redis if running multiple web workers/replicas.
+
+## Mobile app / PWA
+
+When served over HTTPS, authenticated users see **Install app** in the header. Select it to add HealthGrid to the phone or desktop app launcher. On iOS Safari, use the browser share menu → **Add to Home Screen**. The PWA service worker caches only static assets; dashboard HTML, live lock/session responses, APIs, and control actions are never cached.
 
 ## Teams notifications
 

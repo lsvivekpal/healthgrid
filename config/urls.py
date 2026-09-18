@@ -4,6 +4,7 @@ from django.http import JsonResponse
 from django.urls import include, path
 
 from monitor.auth_views import DashboardLoginView, mfa_verify
+from monitor.pwa import service_worker
 
 
 def healthz(request):
@@ -13,6 +14,7 @@ def healthz(request):
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("healthz", healthz, name="healthz"),
+    path("sw.js", service_worker, name="service-worker"),
     path("login/", DashboardLoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("mfa/verify/", mfa_verify, name="mfa-verify"),

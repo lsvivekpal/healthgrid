@@ -55,3 +55,16 @@ class ProductionStaticFilesTests(SimpleTestCase):
         for path in ["/static/db.sqlite3", "/static/config/settings.py"]:
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 404)
+
+    def test_pwa_manifest_and_service_worker_are_available(self):
+        manifest_url = static("monitor/pwa/manifest.webmanifest")
+        manifest = self.client.get(manifest_url)
+        self.assertEqual(manifest.status_code, 200)
+        self.assertIn("application/manifest", manifest["Content-Type"])
+        self.assertContains(manifest, '"short_name": "HealthGrid"')
+
+        worker = self.client.get("/sw.js")
+        self.assertEqual(worker.status_code, 200)
+        self.assertIn("application/javascript", worker["Content-Type"])
+        self.assertEqual(worker["Service-Worker-Allowed"], "/")
+        self.assertIn(b"Never cache dashboard HTML", worker.content)
