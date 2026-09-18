@@ -2,7 +2,7 @@
 
 A Django application for PostgreSQL/RDS lock and session monitoring, controlled backend termination, replication-slot management, Teams notifications, and weekly lock-history reports.
 
-**Author:** [lsvivekpal](https://github.com/lsvivekpal) · **Repository:** [github.com/lsvivekpal/healthgrid](https://github.com/lsvivekpal/healthgrid)
+**Author:** [Vivek Pal](https://github.com/lsvivekpal) · **Repository:** [github.com/lsvivekpal/healthgrid](https://github.com/lsvivekpal/healthgrid)
 
 Instances are registered manually. The app connects directly to PostgreSQL; it does not discover instances through AWS or delete AWS RDS infrastructure.
 
