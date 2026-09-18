@@ -47,9 +47,14 @@
     <label for="id_username">DB username</label>
     <input type="text" name="username" id="id_username" value="{{ prefill.username|default:"" }}" required placeholder="appuser">
 
-    <label for="id_control_username">Lock-control username <span class="section-hint">(optional, recommended)</span></label>
+    {% if user.is_superuser %}
+    <label style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;font-weight:400;color:var(--text);">
+      <input type="checkbox" name="lock_control_enabled" id="id_lock_control_enabled" {% if prefill.lock_control_enabled %}checked{% endif %} style="width:auto;margin-top:3px;">
+      <span>Enable dedicated lock-control credentials <span class="section-hint" style="display:block;line-height:1.4;">Disabled by default. Only Administrators can enable this. When disabled, regular DB credentials are used.</span></span>
+    </label>
+    <label for="id_control_username">Lock-control username</label>
     <input type="text" name="control_username" id="id_control_username" value="{{ prefill.control_username|default:"" }}" placeholder="db_lock_admin">
-    <div class="section-hint" style="margin-top:5px;line-height:1.45;">Use a dedicated role for monitoring and killing sessions. If blank, the DB username above is used.</div>
+    {% endif %}
 
     <label for="id_owner_teams_webhook_url">Owner Teams webhook <span class="section-hint">(optional lock alerts)</span></label>
     <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ prefill.owner_teams_webhook_url|default:"" }}" placeholder="https://...">
@@ -62,8 +67,10 @@
     <label for="id_password">DB password</label>
     <input type="password" name="password" id="id_password" value="{{ prefill.password|default:"" }}" required>
 
+    {% if user.is_superuser %}
     <label for="id_control_password">Lock-control password</label>
-    <input type="password" name="control_password" id="id_control_password" placeholder="Required when lock-control username is set">
+    <input type="password" name="control_password" id="id_control_password" placeholder="Required when dedicated credentials are enabled">
+    {% endif %}
 
     <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-weight:400;color:var(--text);">
       <input type="checkbox" name="ssl_required" id="id_ssl_required" {% if prefill.ssl_required|default:True %}checked{% endif %} style="width:auto;">

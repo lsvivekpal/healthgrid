@@ -109,8 +109,9 @@ def get_connection(instance):
     It prevents a blocked application role from taking the dashboard's
     emergency path down with it.
     """
-    username = instance.control_username or instance.username
-    password = instance.get_control_password() if instance.control_username else instance.get_password()
+    use_control_credentials = instance.lock_control_enabled and bool(instance.control_username)
+    username = instance.control_username if use_control_credentials else instance.username
+    password = instance.get_control_password() if use_control_credentials else instance.get_password()
     try:
         return psycopg2.connect(
             host=instance.host,

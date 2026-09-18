@@ -271,9 +271,9 @@ Notification cards, weekly report timestamps, and schedules use IST (`Asia/Kolka
 
 ## Registering databases
 
-Operators and Administrators can use **Add instance** to configure a friendly name, database identifier, region, endpoint, port, database name, credentials, SSL preference, optional control credentials, and optional owner Teams webhook.
+Operators and Administrators can use **Add instance** to configure a friendly name, database identifier, region, endpoint, port, database name, credentials, SSL preference, and optional owner Teams webhook. Dedicated lock-control credentials are disabled by default; only an Administrator can enable and configure them for an instance.
 
-Use **Test connection** before saving. Existing instance pages support rename, duplicate, owner-webhook update/test, and lock-control credential update/test. A configured control username needs its password; clearing that username restores fallback to the regular DB credentials.
+Use **Test connection** before saving. Existing instance pages support rename, duplicate, and owner-webhook update/test. Administrators can enable, update, and test dedicated lock-control credentials. When disabled, monitoring and control actions use the regular DB credentials.
 
 ### PostgreSQL privileges and control connections
 
@@ -330,6 +330,7 @@ Administrator means an active Django superuser with staff access—not a usernam
 | --- | --- | --- | --- |
 | View dashboard/locks/sessions/slots/audits and export CSV | All instances | Assigned instances | Assigned instances |
 | Add/duplicate/rename instances; edit credentials/webhooks | Yes | Yes, assigned instances | No |
+| Enable/configure dedicated lock-control credentials | Yes | No | No |
 | Configure notifications; send tests/manual reports | Yes | Yes | No |
 | Individual lock kill | Yes | Yes, assigned instances | No |
 | Live-session and bulk/chain kills | Yes, MFA | Yes, MFA, assigned instances | No |

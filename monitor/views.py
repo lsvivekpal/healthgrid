@@ -506,7 +506,12 @@ def instance_detail(request, pk):
     return render(
         request,
         "monitor/instance_detail.html",
-        {"instance": instance, "audit_logs": audit_logs, "can_operate_instance": can_operate_instance(request.user, instance)},
+        {
+            "instance": instance,
+            "audit_logs": audit_logs,
+            "can_operate_instance": can_operate_instance(request.user, instance),
+            "is_administrator": request.user.is_superuser,
+        },
     )
 
 
@@ -837,9 +842,10 @@ def kill_lock_chain(request, pk):
 def add_instance(request):
     _require_staff(request)
     if request.method == "POST":
-        control_username = request.POST.get("control_username", "").strip()
-        control_password = request.POST.get("control_password", "")
-        if control_username and not control_password:
+        lock_control_enabled = request.user.is_superuser and bool(request.POST.get("lock_control_enabled"))
+        control_username = request.POST.get("control_username", "").strip() if lock_control_enabled else ""
+        control_password = request.POST.get("control_password", "") if lock_control_enabled else ""
+        if lock_control_enabled and control_username and not control_password:
             messages.error(request, "Lock-control password is required when a lock-control username is provided.")
             return render(request, "monitor/add_instance.html", {"prefill": {
                 key: request.POST.get(key, "")
@@ -853,6 +859,7 @@ def add_instance(request):
             port=request.POST.get("port") or 5432,
             db_name=request.POST["db_name"],
             username=request.POST["username"],
+            lock_control_enabled=lock_control_enabled,
             control_username=control_username,
             owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
             exclude_from_global_notifications=bool(request.POST.get("exclude_from_global_notifications")),
@@ -877,7 +884,8 @@ def add_instance(request):
             "host": source.host,
             "port": source.port,
             "username": source.username,
-            "control_username": source.control_username,
+            "lock_control_enabled": source.lock_control_enabled if request.user.is_superuser else False,
+            "control_username": source.control_username if request.user.is_superuser and source.lock_control_enabled else "",
             "owner_teams_webhook_url": source.owner_teams_webhook_url,
             "exclude_from_global_notifications": source.exclude_from_global_notifications,
             "password": source.get_password(),
@@ -906,9 +914,12 @@ def test_connection(request):
 @login_required
 @require_POST
 def test_control_connection(request, pk):
-    _require_staff(request)
+    _require_administrator(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_instance_access(request, instance, write=True)
+    if not instance.lock_control_enabled:
+        messages.error(request, "Dedicated lock-control credentials are disabled for this instance.")
+        return redirect("instance-detail", pk=instance.pk)
     try:
         conn = db.get_connection(instance)
         conn.close()
@@ -963,22 +974,34 @@ def update_owner_webhook(request, pk):
 @login_required
 @require_POST
 def update_control_credentials(request, pk):
-    _require_staff(request)
+    _require_administrator(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_instance_access(request, instance, write=True)
-    control_username = request.POST.get("control_username", "").strip()
-    control_password = request.POST.get("control_password", "")
-    if control_username and not control_password:
+    lock_control_enabled = bool(request.POST.get("lock_control_enabled"))
+    control_username = request.POST.get("control_username", "").strip() if lock_control_enabled else ""
+    control_password = request.POST.get("control_password", "") if lock_control_enabled else ""
+    if (
+        lock_control_enabled
+        and control_username
+        and not control_password
+        and (
+            not instance.control_password_encrypted
+            or not instance.lock_control_enabled
+            or control_username != instance.control_username
+        )
+    ):
         messages.error(request, "Enter the lock-control password, or clear the username to use the DB username.")
         return redirect("instance-detail", pk=instance.pk)
 
+    instance.lock_control_enabled = lock_control_enabled
     instance.control_username = control_username
     if control_username:
-        instance.set_control_password(control_password)
+        if control_password:
+            instance.set_control_password(control_password)
     else:
         instance.control_password_encrypted = ""
-    instance.save(update_fields=["control_username", "control_password_encrypted"])
-    messages.success(request, "Lock-control credentials saved. Monitoring and kill actions will use them immediately.")
+    instance.save(update_fields=["lock_control_enabled", "control_username", "control_password_encrypted"])
+    messages.success(request, "Lock-control credentials saved. They are enabled only when the Administrator switch is on.")
     return redirect("instance-detail", pk=instance.pk)
 
 

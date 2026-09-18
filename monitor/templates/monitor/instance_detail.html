@@ -88,14 +88,19 @@
         .control-credentials-actions .btn { width:100%; justify-content:center; }
       }
     </style>
+    {% if is_administrator %}
     <div class="control-credentials-panel">
       <div class="control-credentials-heading">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);"><path d="M12 2a5 5 0 0 0-5 5v4H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2V7a5 5 0 0 0-5-5z"/><path d="M12 16v2"/></svg>
         Lock-control credentials
       </div>
-      <div class="section-hint" style="margin-bottom:12px;line-height:1.45;">Used for lock monitoring and kill actions. Leave the username blank to use the regular DB username.</div>
+      <div class="section-hint" style="margin-bottom:12px;line-height:1.45;">Disabled by default. Enable this only when a dedicated role is configured; otherwise regular DB credentials are used.</div>
       <form method="post" action="{% url 'instance-control-credentials' instance.pk %}" class="control-credentials-grid">
       {% csrf_token %}
+      <label style="display:flex;align-items:flex-start;gap:8px;margin:0;grid-column:1/-1;font-weight:400;">
+        <input type="checkbox" name="lock_control_enabled" value="1" {% if instance.lock_control_enabled %}checked{% endif %} style="width:auto;margin-top:3px;">
+        <span>Enable dedicated lock-control credentials <span class="section-hint" style="display:block;line-height:1.4;">Only Administrators can change this setting.</span></span>
+      </label>
       <div class="control-credentials-field">
         <label for="id_control_username">Username</label>
         <input type="text" name="control_username" id="id_control_username" value="{{ instance.control_username }}" placeholder="db_lock_admin">
@@ -114,6 +119,9 @@
       <button class="btn btn-ghost btn-sm" type="submit">Test lock-control connection</button>
       <span class="section-hint">The control role needs permission to inspect sessions and terminate backends.</span>
     </form>
+    {% else %}
+    <div class="section-hint" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">Dedicated lock-control credentials are Administrator-only and disabled unless explicitly enabled. This instance currently uses regular DB credentials for monitoring and lock actions.</div>
+    {% endif %}
     <form method="post" action="{% url 'test-notification' %}" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       {% csrf_token %}
       <input type="hidden" name="destination" value="owner chat">

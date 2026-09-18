@@ -15,6 +15,10 @@ class RDSInstance(models.Model):
     port = models.PositiveIntegerField(default=5432)
     db_name = models.CharField(max_length=255)
     username = models.CharField(max_length=255, help_text="DB login username")
+    lock_control_enabled = models.BooleanField(
+        default=False,
+        help_text="Allow the dedicated lock-control credentials to be used; Administrator-only setting",
+    )
     control_username = models.CharField(
         max_length=255,
         blank=True,

@@ -57,8 +57,7 @@ class ProductionStaticFilesTests(SimpleTestCase):
                 self.assertEqual(self.client.get(path).status_code, 404)
 
     def test_pwa_manifest_and_service_worker_are_available(self):
-        manifest_url = static("monitor/pwa/manifest.webmanifest")
-        manifest = self.client.get(manifest_url)
+        manifest = self.client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
         self.assertIn("application/manifest", manifest["Content-Type"])
         self.assertContains(manifest, '"short_name": "HealthGrid"')

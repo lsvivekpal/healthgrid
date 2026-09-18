@@ -57,7 +57,7 @@ class BlockingQueryParseTests(TestCase):
 
     @patch("monitor.db.psycopg2.connect")
     def test_control_credentials_are_used_for_database_connections(self, connect):
-        instance = make_instance(control_username="db_lock_admin")
+        instance = make_instance(lock_control_enabled=True, control_username="db_lock_admin")
         instance.set_control_password("controlpass")
         instance.save(update_fields=["control_password_encrypted"])
 
@@ -68,6 +68,18 @@ class BlockingQueryParseTests(TestCase):
         self.assertEqual(kwargs["password"], "controlpass")
         self.assertEqual(kwargs["application_name"], "healthgrid-control")
         self.assertIn("statement_timeout=8000", kwargs["options"])
+
+    @patch("monitor.db.psycopg2.connect")
+    def test_control_credentials_are_disabled_by_default(self, connect):
+        instance = make_instance(control_username="db_lock_admin")
+        instance.set_control_password("controlpass")
+        instance.save(update_fields=["control_password_encrypted"])
+
+        db.get_connection(instance)
+
+        kwargs = connect.call_args.kwargs
+        self.assertEqual(kwargs["user"], "appuser")
+        self.assertEqual(kwargs["password"], "apppass")
 
 
 class _FakeCursor:
