@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import os
 from pathlib import Path
 
@@ -128,13 +130,16 @@ CACHES = {
 # TTL for caching polled activity results, in seconds.
 ACTIVITY_CACHE_TTL = int(os.environ.get("ACTIVITY_CACHE_TTL", "10"))
 
-# Fernet key encrypting stored RDS instance passwords at rest. Dev-only default below —
-# set a real key (Fernet.generate_key()) via env var in any shared/deployed environment,
-# changing it makes existing stored passwords undecryptable.
+# Fernet key encrypting stored RDS instance passwords at rest. Production must
+# receive a stable secret from the environment; changing it makes existing
+# encrypted passwords undecryptable. Debug mode derives a deterministic local
+# development value without storing a key-shaped secret in source control.
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")
 if not ENCRYPTION_KEY:
     if DEBUG:
-        ENCRYPTION_KEY = "REDACTED_DEV_KEY"
+        ENCRYPTION_KEY = base64.urlsafe_b64encode(
+            hashlib.sha256(b"healthgrid-local-development-only").digest()
+        ).decode("ascii")
     else:
         raise ImproperlyConfigured("ENCRYPTION_KEY must be set when DJANGO_DEBUG is false")
 
