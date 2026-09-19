@@ -30,6 +30,13 @@
     <input type="text" name="region" id="id_region" value="{{ prefill.region|default:"us-east-1" }}" required>
 
     <div class="section-hint" style="text-transform:uppercase;letter-spacing:.05em;font-size:11px;font-weight:700;margin-top:20px;color:var(--brand);">Connection</div>
+    <label for="id_engine">Database engine</label>
+    <select name="engine" id="id_engine">
+      <option value="postgresql" {% if prefill.engine|default:"postgresql" == "postgresql" %}selected{% endif %}>PostgreSQL</option>
+      <option value="mysql" {% if prefill.engine == "mysql" %}selected{% endif %}>MySQL</option>
+      <option value="mariadb" {% if prefill.engine == "mariadb" %}selected{% endif %}>MariaDB</option>
+    </select>
+    <div class="section-hint" style="margin-top:5px;line-height:1.4;">PostgreSQL supports replication-slot management. MySQL and MariaDB support sessions, locks, and query termination.</div>
     <label for="id_host">Endpoint host</label>
     <input type="text" name="host" id="id_host" value="{{ prefill.host|default:"" }}" required placeholder="my-app-prod.xxxx.us-east-1.rds.amazonaws.com">
 
@@ -103,4 +110,16 @@
     <button class="btn btn-ghost btn-sm" type="submit" onclick="document.getElementById('owner-webhook-test-url').value=document.getElementById('id_owner_teams_webhook_url').value;">Send test to owner chat</button>
   </form>
 </div>
+<script>
+  (function () {
+    const engine = document.getElementById('id_engine');
+    const port = document.getElementById('id_port');
+    if (!engine || !port) return;
+    engine.addEventListener('change', function () {
+      if (port.value === '5432' || port.value === '3306') {
+        port.value = this.value === 'postgresql' ? '5432' : '3306';
+      }
+    });
+  }());
+</script>
 {% endblock %}

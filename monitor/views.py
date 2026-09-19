@@ -849,10 +849,11 @@ def add_instance(request):
             messages.error(request, "Lock-control password is required when a lock-control username is provided.")
             return render(request, "monitor/add_instance.html", {"prefill": {
                 key: request.POST.get(key, "")
-                for key in ("name", "db_identifier", "region", "host", "port", "db_name", "username", "control_username", "owner_teams_webhook_url")
+                for key in ("name", "engine", "db_identifier", "region", "host", "port", "db_name", "username", "control_username", "owner_teams_webhook_url")
             }})
         instance = RDSInstance(
             name=request.POST["name"],
+            engine=request.POST.get("engine", "postgresql"),
             db_identifier=request.POST["db_identifier"],
             region=request.POST.get("region", "us-east-1"),
             host=request.POST["host"],
@@ -880,6 +881,7 @@ def add_instance(request):
         source = get_object_or_404(RDSInstance, pk=duplicate_pk)
         _require_instance_access(request, source, write=True)
         prefill = {
+            "engine": source.engine,
             "region": source.region,
             "host": source.host,
             "port": source.port,
@@ -901,6 +903,7 @@ def test_connection(request):
     creds currently in the form, doesn't touch the database."""
     _require_staff(request)
     ok, error = db.test_connection(
+        engine=request.POST.get("engine", "postgresql"),
         host=request.POST.get("host", ""),
         port=request.POST.get("port") or 5432,
         db_name=request.POST.get("db_name", ""),
