@@ -1,10 +1,14 @@
 # HealthGrid
 
-A Django application for PostgreSQL/RDS lock and session monitoring, controlled backend termination, replication-slot management, Teams notifications, and weekly lock-history reports.
+A Django application for PostgreSQL, MySQL, and MariaDB lock and session monitoring, controlled backend termination, Teams notifications, and weekly lock-history reports.
 
 **Author:** [Vivek Pal](https://github.com/lsvivekpal) · **Repository:** [github.com/lsvivekpal/healthgrid](https://github.com/lsvivekpal/healthgrid)
 
-Instances are registered manually. The app connects directly to PostgreSQL; it does not discover instances through AWS or delete AWS RDS infrastructure.
+Instances are registered manually. The app connects directly to each registered database; it does not discover instances through AWS or delete AWS RDS infrastructure.
+
+### Supported database engines
+
+HealthGrid currently supports PostgreSQL, MySQL, and MariaDB. Select the engine when adding an instance so HealthGrid uses the correct connection, activity, lock, and termination commands. PostgreSQL additionally supports replication-slot management. MySQL and MariaDB expose engine-specific session and InnoDB lock monitoring; their lock catalog requires the monitoring user to have access to `information_schema.PROCESSLIST` and the InnoDB lock views.
 
 ## Contents
 
@@ -293,6 +297,46 @@ Control connections use application name `healthgrid-control`, with a 5-second c
 A blocked connection belonging to `db_lock_admin` does not necessarily block every new connection using that username. The dashboard opens independent connections; access still depends on network reachability, connection capacity, and DB privileges. It does not automatically kill its own PIDs to recover access.
 
 Require SSL selects `sslmode=require`; unchecked selects `prefer`. Neither is hostname-verifying `verify-full`.
+
+### MySQL privileges and control connections
+
+Use a dedicated account. Replace `healthgrid_db` and the host pattern with your database and network policy. For monitoring only:
+
+```sql
+CREATE USER 'healthgrid'@'10.%' IDENTIFIED BY 'use-a-secret-manager-password';
+GRANT PROCESS ON *.* TO 'healthgrid'@'10.%';
+GRANT SELECT ON performance_schema.* TO 'healthgrid'@'10.%';
+```
+
+For MySQL 8, the optional dedicated control account also needs permission to terminate sessions belonging to other users:
+
+```sql
+CREATE USER 'healthgrid_control'@'10.%' IDENTIFIED BY 'use-a-secret-manager-password';
+GRANT PROCESS ON *.* TO 'healthgrid_control'@'10.%';
+GRANT SELECT ON performance_schema.* TO 'healthgrid_control'@'10.%';
+GRANT CONNECTION_ADMIN ON *.* TO 'healthgrid_control'@'10.%';
+```
+
+`PROCESS` is required to see other users' sessions and InnoDB lock metadata. `SELECT` on `performance_schema` enables the MySQL 8 lock-wait fallback. `CONNECTION_ADMIN` permits `KILL CONNECTION` for other users; use the deprecated `SUPER` privilege only when required by an older server and approved by a DBA. The application does not need table-level business-data privileges.
+
+### MariaDB privileges and control connections
+
+For MariaDB, use the equivalent least-privilege grants:
+
+```sql
+CREATE USER 'healthgrid'@'10.%' IDENTIFIED BY 'use-a-secret-manager-password';
+GRANT PROCESS ON *.* TO 'healthgrid'@'10.%';
+GRANT SELECT ON performance_schema.* TO 'healthgrid'@'10.%';
+
+CREATE USER 'healthgrid_control'@'10.%' IDENTIFIED BY 'use-a-secret-manager-password';
+GRANT PROCESS ON *.* TO 'healthgrid_control'@'10.%';
+GRANT SELECT ON performance_schema.* TO 'healthgrid_control'@'10.%';
+GRANT CONNECTION ADMIN ON *.* TO 'healthgrid_control'@'10.%';
+```
+
+On MariaDB versions that do not provide the `CONNECTION ADMIN` dynamic privilege, the DBA must use the version's documented administrative equivalent. Without it, the dashboard can monitor only sessions permitted to the account and cannot terminate other users' connections. Verify the exact privilege names with `SHOW PRIVILEGES;` before applying grants.
+
+These grants allow visibility and session control only; they do not grant access to application table contents. Restrict the account host pattern, require TLS where available, and store passwords in the deployment secret manager rather than in source control.
 
 ## Dashboard and lock control
 

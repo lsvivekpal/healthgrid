@@ -2,6 +2,8 @@ import logging
 
 import psycopg2
 import psycopg2.extras
+import pymysql
+import pymysql.cursors
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -102,6 +104,94 @@ class ConnectionError(Exception):
     pass
 
 
+def _is_mysql(instance):
+    return getattr(instance, "engine", "postgresql") in {"mysql", "mariadb"}
+
+
+MYSQL_ACTIVITY_QUERY = """
+    SELECT ID AS pid, USER AS usename, HOST AS client_addr,
+           COMMAND, STATE AS wait_event, INFO AS query,
+           CASE WHEN COMMAND = 'Sleep' THEN 'idle' ELSE 'active' END AS state,
+           TIME AS duration_seconds,
+           NULL AS application_name
+    FROM information_schema.PROCESSLIST
+    WHERE DB = %s AND ID <> CONNECTION_ID() AND COMMAND <> 'Sleep'
+    ORDER BY TIME DESC
+"""
+
+# MariaDB and older MySQL expose InnoDB waits through these catalog views.
+# MySQL 8 installations without them use the performance-schema fallback.
+MYSQL_LOCK_QUERY = """
+    SELECT waiting_trx.trx_mysql_thread_id AS blocked_pid,
+           waiting_trx.trx_mysql_thread_id AS blocked_user_pid,
+           blocking_trx.trx_mysql_thread_id AS blocking_pid,
+           blocked_process.USER AS blocked_user,
+           blocking_process.USER AS blocking_user,
+           blocked_process.INFO AS blocked_query,
+           blocking_process.INFO AS blocking_query,
+           waiting_trx.trx_started AS blocked_query_start,
+           TIMESTAMPDIFF(SECOND, waiting_trx.trx_started, NOW()) AS waiting_seconds
+    FROM information_schema.INNODB_LOCK_WAITS waits
+    JOIN information_schema.INNODB_TRX waiting_trx
+      ON waiting_trx.trx_id = waits.requesting_trx_id
+    JOIN information_schema.INNODB_TRX blocking_trx
+      ON blocking_trx.trx_id = waits.blocking_trx_id
+    LEFT JOIN information_schema.PROCESSLIST blocked_process
+      ON blocked_process.ID = waiting_trx.trx_mysql_thread_id
+    LEFT JOIN information_schema.PROCESSLIST blocking_process
+      ON blocking_process.ID = blocking_trx.trx_mysql_thread_id
+"""
+
+MYSQL_PERFORMANCE_LOCK_QUERY = """
+    SELECT requesting_thread.PROCESSLIST_ID AS blocked_pid,
+           blocking_thread.PROCESSLIST_ID AS blocking_pid,
+           requesting_thread.PROCESSLIST_USER AS blocked_user,
+           blocking_thread.PROCESSLIST_USER AS blocking_user,
+           requesting_thread.PROCESSLIST_INFO AS blocked_query,
+           blocking_thread.PROCESSLIST_INFO AS blocking_query,
+           requesting_thread.PROCESSLIST_TIME AS waiting_seconds
+    FROM performance_schema.data_lock_waits waits
+    JOIN performance_schema.data_locks requesting_lock
+      ON requesting_lock.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
+    JOIN performance_schema.data_locks blocking_lock
+      ON blocking_lock.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID
+    JOIN performance_schema.threads requesting_thread
+      ON requesting_thread.THREAD_ID = requesting_lock.THREAD_ID
+    JOIN performance_schema.threads blocking_thread
+      ON blocking_thread.THREAD_ID = blocking_lock.THREAD_ID
+"""
+
+
+def _mysql_activity(instance, conn):
+    with conn.cursor() as cur:
+        cur.execute(MYSQL_ACTIVITY_QUERY, (instance.db_name,))
+        return list(cur.fetchall())
+
+
+def _mysql_blocking(conn):
+    with conn.cursor() as cur:
+        try:
+            cur.execute(MYSQL_LOCK_QUERY)
+            rows = list(cur.fetchall())
+        except Exception:
+            try:
+                cur.execute(MYSQL_PERFORMANCE_LOCK_QUERY)
+                rows = list(cur.fetchall())
+            except Exception:
+                # Keep monitoring available when the optional lock catalog is
+                # disabled or the monitoring role lacks its privileges.
+                logger.warning("MySQL lock catalog is unavailable", exc_info=True)
+                rows = []
+    for row in rows:
+        row["blocked_pid"] = row.get("blocked_pid")
+        row["blocking_pid"] = row.get("blocking_pid")
+        row["blocked_user"] = row.get("blocked_user") or ""
+        row["blocking_user"] = row.get("blocking_user") or ""
+        row["blocked_query"] = row.get("blocked_query") or ""
+        row["blocking_query"] = row.get("blocking_query") or ""
+    return rows
+
+
 def get_connection(instance):
     """Open an independent control connection to the target RDS instance.
 
@@ -113,6 +203,24 @@ def get_connection(instance):
     username = instance.control_username if use_control_credentials else instance.username
     password = instance.get_control_password() if use_control_credentials else instance.get_password()
     try:
+        if _is_mysql(instance):
+            ssl = {}
+            if instance.ssl_required and settings.DB_SSL_ROOT_CERT:
+                ssl["ca"] = settings.DB_SSL_ROOT_CERT
+            return pymysql.connect(
+                host=instance.host,
+                port=int(instance.port),
+                database=instance.db_name,
+                user=username,
+                password=password,
+                connect_timeout=CONNECT_TIMEOUT_SECONDS,
+                read_timeout=CONNECT_TIMEOUT_SECONDS,
+                write_timeout=CONNECT_TIMEOUT_SECONDS,
+                autocommit=True,
+                cursorclass=pymysql.cursors.DictCursor,
+                ssl=ssl if instance.ssl_required else None,
+                program_name="healthgrid-control",
+            )
         return psycopg2.connect(
             host=instance.host,
             port=instance.port,
@@ -137,6 +245,8 @@ def fetch_activity(instance):
     """Return (activity_rows, blocking_rows) for the instance."""
     conn = get_connection(instance)
     try:
+        if _is_mysql(instance):
+            return _mysql_activity(instance, conn), _mysql_blocking(conn)
         conn.set_session(readonly=True, autocommit=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(ACTIVITY_QUERY)
@@ -153,6 +263,33 @@ def fetch_activity_with_vitals(instance):
     connection. Used by the live dashboard so everything refreshes together."""
     conn = get_connection(instance)
     try:
+        if _is_mysql(instance):
+            activity = _mysql_activity(instance, conn)
+            blocking = _mysql_blocking(conn)
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) AS total_conns,
+                           SUM(COMMAND <> 'Sleep') AS active_conns,
+                           SUM(COMMAND = 'Sleep') AS idle_conns,
+                           0 AS idle_in_txn,
+                           0 AS waiting_on_locks,
+                           @@max_connections AS max_conns,
+                           ROUND(SUM(data_length + index_length), 0) AS db_size,
+                           COALESCE(MAX(TIME), 0) AS longest_active_seconds
+                    FROM information_schema.PROCESSLIST
+                    WHERE DB = %s
+                """, (instance.db_name,))
+                vitals = cur.fetchone()
+                cur.execute("""
+                    SELECT CONCAT(table_schema, '.', table_name) AS table_name,
+                           data_length + index_length AS total_bytes,
+                           ROUND((data_length + index_length) / 1073741824, 2) AS size_gb
+                    FROM information_schema.tables
+                    WHERE table_schema = %s
+                    ORDER BY total_bytes DESC LIMIT 10
+                """, (instance.db_name,))
+                top_tables = list(cur.fetchall())
+            return activity, blocking, vitals, top_tables
         conn.set_session(readonly=True, autocommit=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(ACTIVITY_QUERY)
@@ -191,6 +328,10 @@ def kill_pid(instance, pid, *, allow_replication=False):
     """Terminate a backend; protected replication-slot PIDs return False."""
     conn = get_connection(instance)
     try:
+        if _is_mysql(instance):
+            with conn.cursor() as cur:
+                cur.execute(f"KILL CONNECTION {int(pid)}")
+            return True
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid))
@@ -205,6 +346,15 @@ def kill_pids(instance, pids, *, allow_replication=False):
     conn = get_connection(instance)
     results = {}
     try:
+        if _is_mysql(instance):
+            with conn.cursor() as cur:
+                for pid in pids:
+                    try:
+                        cur.execute(f"KILL CONNECTION {int(pid)}")
+                        results[pid] = True
+                    except Exception:
+                        results[pid] = False
+            return results
         conn.autocommit = True
         with conn.cursor() as cur:
             for pid in pids:
@@ -217,6 +367,8 @@ def kill_pids(instance, pids, *, allow_replication=False):
 
 
 def fetch_replication_slots(instance):
+    if _is_mysql(instance):
+        return []
     conn = get_connection(instance)
     try:
         conn.set_session(readonly=True, autocommit=True)
@@ -230,6 +382,8 @@ def fetch_replication_slots(instance):
 def terminate_replication_slot_backend(instance, slot_name):
     """Terminate the walsender backend currently consuming a slot (if any),
     e.g. so it can subsequently be dropped. Returns True if a backend was killed."""
+    if _is_mysql(instance):
+        return False
     conn = get_connection(instance)
     try:
         conn.autocommit = True
@@ -248,6 +402,8 @@ def terminate_replication_slot_backend(instance, slot_name):
 def drop_replication_slot(instance, slot_name):
     """Drop a replication slot outright. Fails if the slot is still active —
     terminate its backend first. Returns (ok, error)."""
+    if _is_mysql(instance):
+        return False, "Replication slots are only supported for PostgreSQL."
     conn = get_connection(instance)
     try:
         conn.autocommit = True
@@ -262,10 +418,27 @@ def drop_replication_slot(instance, slot_name):
         conn.close()
 
 
-def test_connection(host, port, db_name, username, password, ssl_required):
+def test_connection(engine, host, port, db_name, username, password, ssl_required):
     """Try connecting with raw creds (not a saved instance) — for the Add form's
     'Test connection' button, before anything is persisted."""
     try:
+        if engine in {"mysql", "mariadb"}:
+            ssl = {}
+            if ssl_required and settings.DB_SSL_ROOT_CERT:
+                ssl["ca"] = settings.DB_SSL_ROOT_CERT
+            conn = pymysql.connect(
+                host=host,
+                port=int(port),
+                database=db_name,
+                user=username,
+                password=password,
+                connect_timeout=CONNECT_TIMEOUT_SECONDS,
+                cursorclass=pymysql.cursors.DictCursor,
+                ssl=ssl if ssl_required else None,
+                program_name="healthgrid-test",
+            )
+            conn.close()
+            return True, None
         conn = psycopg2.connect(
             host=host,
             port=port,

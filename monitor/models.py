@@ -8,7 +8,13 @@ from . import crypto
 
 
 class RDSInstance(models.Model):
+    ENGINE_CHOICES = (
+        ("postgresql", "PostgreSQL"),
+        ("mysql", "MySQL"),
+        ("mariadb", "MariaDB"),
+    )
     name = models.CharField(max_length=100, help_text="Friendly display name")
+    engine = models.CharField(max_length=16, choices=ENGINE_CHOICES, default="postgresql")
     db_identifier = models.CharField(max_length=255, help_text="RDS DBInstanceIdentifier")
     region = models.CharField(max_length=32, default="us-east-1")
     host = models.CharField(max_length=255, help_text="RDS endpoint address")

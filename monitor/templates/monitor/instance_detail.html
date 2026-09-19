@@ -137,7 +137,7 @@
 <nav class="section-nav" aria-label="Instance sections">
   <a href="#locks" class="btn btn-ghost btn-sm">Locks <span id="pill-locks" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
   <a href="#sessions" class="btn btn-ghost btn-sm">Sessions <span id="pill-sessions" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
-  <a href="#replication-slots" class="btn btn-ghost btn-sm">Replication slots <span id="pill-slots" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>
+  {% if instance.engine == "postgresql" %}<a href="#replication-slots" class="btn btn-ghost btn-sm">Replication slots <span id="pill-slots" class="badge badge-muted" style="margin-left:2px;display:none;"></span></a>{% endif %}
   <a href="#audit-log" class="btn btn-ghost btn-sm">Audit log</a>
 </nav>
 
@@ -326,13 +326,14 @@
   <div class="card"><div class="skeleton" style="height:14px;width:30%;margin-bottom:10px;"></div><div class="skeleton" style="height:60px;width:100%;"></div></div>
 </div>
 
-<h3 style="margin-top:28px;display:flex;align-items:center;gap:8px;">Replication slots</h3>
+{% if instance.engine == "postgresql" %}<h3 style="margin-top:28px;display:flex;align-items:center;gap:8px;">Replication slots</h3>
 <div id="replication-slots-wrap" style="margin-top:12px;"
      hx-get="{% url 'instance-replication-slots' instance.pk %}"
      hx-trigger="load"
      hx-swap="innerHTML">
   <div class="card"><div class="skeleton" style="height:14px;width:30%;margin-bottom:10px;"></div><div class="skeleton" style="height:40px;width:100%;"></div></div>
 </div>
+{% endif %}
 
 <h3 id="audit-log" style="margin-top:32px;display:flex;align-items:center;gap:8px;scroll-margin-top:16px;">
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
