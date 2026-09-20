@@ -26,6 +26,36 @@ def can_operate_instance(user, instance):
     return instance_role(user, instance) in {"administrator", "operator"}
 
 
+def can_manage_instance_notifications(user, instance):
+    if not (user and user.is_authenticated and user.is_active):
+        return False
+    if user.is_superuser:
+        return True
+    # Preserve the pre-instance-permission behavior for older staff accounts
+    # until an administrator explicitly assigns their instance scope.
+    if not (
+        UserInstanceAccessScope.objects.filter(user=user).exists()
+        or UserInstanceAccess.objects.filter(user=user).exists()
+    ):
+        return bool(user.is_staff)
+    return UserInstanceAccess.objects.filter(
+        user=user, instance=instance, role="operator", can_manage_notifications=True,
+    ).exists()
+
+
+def can_manage_global_notifications(user):
+    if not (user and user.is_authenticated and user.is_active and user.is_staff):
+        return False
+    if user.is_superuser:
+        return True
+    scope = UserInstanceAccessScope.objects.filter(user=user).first()
+    # Accounts created before explicit global notification permissions existed
+    # retain their previous staff access until an Administrator saves them in
+    # User management. New accounts always receive an explicit scope with the
+    # permission disabled by default.
+    return True if scope is None else scope.can_manage_global_notifications
+
+
 def accessible_instances(user):
     queryset = RDSInstance.objects.filter(is_active=True)
     if user.is_superuser or not (

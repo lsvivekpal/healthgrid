@@ -279,6 +279,10 @@ Operators and Administrators can use **Add instance** to configure a friendly na
 
 Use **Test connection** before saving. Existing instance pages support rename, duplicate, and owner-webhook update/test. Administrators can enable, update, and test dedicated lock-control credentials. When disabled, monitoring and control actions use the regular DB credentials.
 
+Administrators can assign each non-administrator account access to individual instances from **User management**, or use **Grant all instances as** to apply Read-only or Operator access in one action. Operators can additionally receive the per-instance **notification management** permission. This permission controls whether they can change the owner Teams webhook and the instance's global-channel exclusion; it does not change which Teams destinations the monitor sends to. Read-only accounts cannot change notification settings. Older staff accounts without an explicit instance-access scope retain their previous access until an Administrator assigns a scope.
+
+Global Notification settings access is a separate Administrator-granted permission and is disabled by default for Operators. The **Exclude from real-time global Teams alerts** control is Administrator-only on the Add instance form, instance page, and global notification settings. Operators can optionally receive per-instance Owner webhook permission, but cannot disable shared-channel alerts. Changing an account from Operator to Read-only removes its operator actions, global notification permission, per-instance notification permissions, and replication-slot permissions.
+
 ### PostgreSQL privileges and control connections
 
 Have a DBA provision an appropriate login role. A starting point for an existing control role is:
@@ -444,7 +448,7 @@ Save settings before **Send test to shared channel**. Add/edit/test an owner web
 
 The app can send alerts to both destinations, deduplicating identical webhook URLs for alert messages. No separate CSV-upload webhook is required.
 
-Each instance has an **Exclude from real-time global Teams alerts** option on
+Each instance has an Administrator-only **Exclude from real-time global Teams alerts** option on
 the Add instance form and detail page. When enabled, real-time lock and
 long-query cards for that instance skip the shared/global channel but still go
 to its owner webhook. The instance remains included in the all-databases weekly
