@@ -12,7 +12,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import F, Q
 from django.db import DatabaseError, transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -27,7 +27,7 @@ from . import db
 from .mfa import require_mfa_for_action
 from .models import AuditLog, DashboardLink, LockAlert, LockReport, NotificationSettings, RDSInstance, ReplicationSlotAccess, UserInstanceAccess, UserInstanceAccessScope
 from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
-from .permissions import IsStaffOrReadOnly, accessible_instances, can_manage_replication_slot, can_operate_instance, can_view_instance
+from .permissions import IsStaffOrReadOnly, accessible_instances, can_manage_global_notifications, can_manage_instance_notifications, can_manage_replication_slot, can_operate_instance, can_view_instance
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 def _require_staff(request):
     if not request.user.is_staff:
         raise PermissionDenied("Staff permission required for this action.")
+
+
+def _require_global_notification_access(request):
+    if not can_manage_global_notifications(request.user):
+        raise PermissionDenied("Global notification-management permission required.")
 
 
 def _require_instance_access(request, instance, *, write=False):
@@ -243,7 +248,7 @@ def dashboard_links(request):
 
 @login_required
 def notification_settings(request):
-    _require_staff(request)
+    _require_global_notification_access(request)
     config = NotificationSettings.load()
     if request.method == "POST":
         webhook_url = request.POST.get("channel_webhook_url", "").strip()
@@ -322,7 +327,7 @@ def notification_settings(request):
                 config.report_retention_days = report_retention_days
                 config.resolved_alert_retention_days = retention_days
                 config.save()
-                if request.POST.get("global_scope_submitted") == "1":
+                if request.POST.get("global_scope_submitted") == "1" and request.user.is_superuser:
                     excluded_ids = {
                         value for value in request.POST.getlist("excluded_instance_ids")
                         if value.isdigit()
@@ -350,6 +355,32 @@ def user_management(request):
         can_drop = request.POST.get("can_drop_slots") == "1"
         can_terminate = request.POST.get("can_terminate_slots") == "1"
         action = request.POST.get("action", "create_user")
+        if action == "update_user_role":
+            try:
+                target_id = int(request.POST.get("user_id", ""))
+            except (TypeError, ValueError):
+                raise PermissionDenied("A valid user is required.")
+            target = get_object_or_404(User.objects, pk=target_id)
+            new_role = request.POST.get("role", "")
+            if target.is_superuser or new_role not in {"readonly", "operator"}:
+                raise PermissionDenied("Only non-administrator accounts can use these roles.")
+            with transaction.atomic():
+                target.is_staff = new_role == "operator"
+                target.save(update_fields=["is_staff"])
+                scope, _ = UserInstanceAccessScope.objects.get_or_create(user=target)
+                scope.can_manage_global_notifications = (
+                    new_role == "operator" and bool(request.POST.get("can_manage_global_notifications"))
+                )
+                scope.save(update_fields=["can_manage_global_notifications", "configured_at"])
+                grants = UserInstanceAccess.objects.filter(user=target)
+                grants.update(
+                    role=new_role,
+                    can_manage_notifications=False if new_role == "readonly" else F("can_manage_notifications"),
+                )
+                if new_role == "readonly":
+                    ReplicationSlotAccess.objects.filter(user=target).update(can_drop=False, can_terminate=False)
+            messages.success(request, f"Changed '{target.username}' to {new_role.replace('_', ' ')}.")
+            return redirect("user-management")
         if action == "update_slot_access":
             try:
                 target_id = int(request.POST.get("user_id", ""))
@@ -371,12 +402,21 @@ def user_management(request):
             if target.is_superuser:
                 raise PermissionDenied("Administrators already have access to every instance.")
             grants = []
+            bulk_role = request.POST.get("all_instance_role", "")
             for instance in RDSInstance.objects.filter(is_active=True):
-                role_value = request.POST.get(f"instance_role_{instance.pk}", "")
+                role_value = bulk_role if bulk_role in {"readonly", "operator"} else request.POST.get(f"instance_role_{instance.pk}", "")
                 if role_value in {"readonly", "operator"}:
                     if role_value == "operator" and not target.is_staff:
                         raise PermissionDenied("Only operator accounts can receive operator instance access.")
-                    grants.append(UserInstanceAccess(user=target, instance=instance, role=role_value))
+                    grants.append(UserInstanceAccess(
+                        user=target,
+                        instance=instance,
+                        role=role_value,
+                        can_manage_notifications=(
+                            target.is_staff and role_value == "operator"
+                            and bool(request.POST.get(f"instance_notifications_{instance.pk}"))
+                        ),
+                    ))
             with transaction.atomic():
                 UserInstanceAccess.objects.filter(user=target).delete()
                 UserInstanceAccess.objects.bulk_create(grants)
@@ -403,33 +443,52 @@ def user_management(request):
             else:
                 grant_specs = []
                 invalid_grant = False
+                bulk_role = request.POST.get("new_all_instance_role", "")
                 for instance in active_instances:
-                    instance_role = request.POST.get(f"new_instance_role_{instance.pk}", "")
+                    instance_role = bulk_role if bulk_role in {"readonly", "operator"} else request.POST.get(f"new_instance_role_{instance.pk}", "")
                     if instance_role in {"readonly", "operator"}:
                         if instance_role == "operator" and role != "operator":
                             invalid_grant = True
                             break
-                        grant_specs.append((instance, instance_role))
+                        grant_specs.append((
+                            instance,
+                            instance_role,
+                            role == "operator" and bool(request.POST.get(f"new_instance_notifications_{instance.pk}")),
+                        ))
                 if invalid_grant:
                     messages.error(request, "Read-only accounts cannot receive operator instance access.")
                 else:
                     with transaction.atomic():
                         user = User.objects.create_user(username=username, email=email, password=password, is_staff=role == "operator")
-                        UserInstanceAccessScope.objects.create(user=user)
+                        UserInstanceAccessScope.objects.create(
+                            user=user,
+                            can_manage_global_notifications=(
+                                role == "operator" and bool(request.POST.get("new_can_manage_global_notifications"))
+                            ),
+                        )
                         if role == "operator" and (can_drop or can_terminate):
                             _save_slot_access(request, user, can_drop, can_terminate)
                         UserInstanceAccess.objects.bulk_create([
-                            UserInstanceAccess(user=user, instance=instance, role=instance_role)
-                            for instance, instance_role in grant_specs
+                            UserInstanceAccess(
+                                user=user, instance=instance, role=instance_role,
+                                can_manage_notifications=can_notify,
+                            )
+                            for instance, instance_role, can_notify in grant_specs
                         ])
                     messages.success(request, f"Created {role} user '{username}'. They will enroll their own authenticator on first login.")
                     return redirect("user-management")
-    users = list(User.objects.select_related("replication_slot_access", "mfa_profile").order_by("username"))
+    users = list(User.objects.select_related("replication_slot_access", "mfa_profile", "instance_access_scope").order_by("username"))
     grants = UserInstanceAccess.objects.select_related("instance").filter(user__in=users)
     access_map = {(grant.user_id, grant.instance_id): grant.role for grant in grants}
     for account in users:
         account.instance_access_rows = [
-            {"instance": instance, "role": access_map.get((account.pk, instance.pk), "")}
+            {
+                "instance": instance,
+                "role": access_map.get((account.pk, instance.pk), ""),
+                "can_manage_notifications": UserInstanceAccess.objects.filter(
+                    user=account, instance=instance, can_manage_notifications=True,
+                ).exists(),
+            }
             for instance in active_instances
         ]
     return render(request, "monitor/user_management.html", {
@@ -446,7 +505,13 @@ def test_notification(request):
     destination = request.POST.get("destination", "Teams")
     webhook_url = request.POST.get("webhook_url", "").strip()
     if destination == "shared channel":
+        _require_global_notification_access(request)
         webhook_url = NotificationSettings.load().channel_webhook_url
+    elif destination == "owner chat" and request.POST.get("instance_id"):
+        instance = get_object_or_404(RDSInstance, pk=request.POST["instance_id"])
+        if not can_manage_instance_notifications(request.user, instance):
+            raise PermissionDenied("Notification-management permission is required for this instance.")
+        webhook_url = instance.owner_teams_webhook_url
     ok, detail = send_test_notification(webhook_url, destination)
     if ok:
         messages.success(request, detail)
@@ -463,7 +528,7 @@ def test_notification(request):
 @login_required
 @require_POST
 def send_weekly_report_now(request):
-    _require_staff(request)
+    _require_global_notification_access(request)
     if send_weekly_reports():
         messages.success(request, "Weekly lock report sent through the configured Teams webhook(s).")
     else:
@@ -510,6 +575,7 @@ def instance_detail(request, pk):
             "instance": instance,
             "audit_logs": audit_logs,
             "can_operate_instance": can_operate_instance(request.user, instance),
+            "can_manage_notifications": can_manage_instance_notifications(request.user, instance),
             "is_administrator": request.user.is_superuser,
         },
     )
@@ -863,7 +929,9 @@ def add_instance(request):
             lock_control_enabled=lock_control_enabled,
             control_username=control_username,
             owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
-            exclude_from_global_notifications=bool(request.POST.get("exclude_from_global_notifications")),
+            exclude_from_global_notifications=(
+                request.user.is_superuser and bool(request.POST.get("exclude_from_global_notifications"))
+            ),
             ssl_required=bool(request.POST.get("ssl_required")),
             added_by=request.user,
         )
@@ -956,7 +1024,8 @@ def rename_instance(request, pk):
 def update_owner_webhook(request, pk):
     _require_staff(request)
     instance = get_object_or_404(RDSInstance, pk=pk)
-    _require_instance_access(request, instance, write=True)
+    if not can_manage_instance_notifications(request.user, instance):
+        raise PermissionDenied("Notification-management permission is required for this instance.")
     webhook_url = request.POST.get("owner_teams_webhook_url", "").strip()
     if len(webhook_url) > 2048:
         messages.error(request, "The Teams webhook URL must be 2048 characters or fewer.")
@@ -968,8 +1037,11 @@ def update_owner_webhook(request, pk):
             messages.error(request, "Enter a valid Teams webhook URL or leave the field blank.")
             return redirect("instance-detail", pk=instance.pk)
     instance.owner_teams_webhook_url = webhook_url
-    instance.exclude_from_global_notifications = bool(request.POST.get("exclude_from_global_notifications"))
-    instance.save(update_fields=["owner_teams_webhook_url", "exclude_from_global_notifications"])
+    update_fields = ["owner_teams_webhook_url"]
+    if request.user.is_superuser:
+        instance.exclude_from_global_notifications = bool(request.POST.get("exclude_from_global_notifications"))
+        update_fields.append("exclude_from_global_notifications")
+    instance.save(update_fields=update_fields)
     messages.success(request, "Owner Teams webhook and global notification setting saved.")
     return redirect("instance-detail", pk=instance.pk)
 

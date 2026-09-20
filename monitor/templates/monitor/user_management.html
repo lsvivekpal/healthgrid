@@ -19,8 +19,12 @@
       <div><label for="id_username">Username</label><input type="text" name="username" id="id_username" required autocomplete="username"></div>
       <div><label for="id_email">Email (optional)</label><input type="email" name="email" id="id_email" autocomplete="email"></div>
       <div><label for="id_password">Temporary password</label><input type="password" name="password" id="id_password" required autocomplete="new-password"></div>
-      <div><label for="id_role">Access</label><select name="role" id="id_role" onchange="syncSlotGrantInputs()"><option value="readonly">Read-only</option><option value="operator">Operator</option></select></div>
+      <div><label for="id_role">Access</label><select name="role" id="id_role" onchange="syncSlotGrantInputs();syncGlobalNotificationGrant()"><option value="readonly">Read-only</option><option value="operator">Operator</option></select></div>
     </div>
+    <label id="new-global-notification-grant" style="display:flex;align-items:center;gap:8px;margin-top:14px;font-weight:400;">
+      <input type="checkbox" name="new_can_manage_global_notifications" value="1"> Allow global notification settings
+      <span class="section-hint">Disabled by default for Operators. Shared-channel exclusion is Administrator-only; per-instance Owner webhook access is separate.</span>
+    </label>
     <fieldset id="new-slot-grants" disabled style="margin:18px 0 0;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);">
       <legend style="font-size:13px;font-weight:600;">Optional operator replication permissions</legend>
       <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="can_terminate_slots" value="1">Terminate slot backend</label>
@@ -29,15 +33,24 @@
     </fieldset>
     <fieldset style="margin:18px 0 0;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);">
       <legend style="font-size:13px;font-weight:600;">Instance access</legend>
-      <div class="section-hint" style="margin-bottom:10px;">Select only the databases this user should see. Operator access enables kill actions for that instance; read-only access only permits viewing.</div>
+      <div class="section-hint" style="margin-bottom:10px;">Select databases individually or grant all at once. Operator access enables kill actions; the optional Owner webhook permission allows managing that instance's owner Teams destination. Shared-channel exclusion is Administrator-only.</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:9px;background:var(--surface-alt);border-radius:var(--radius-sm);">
+        <label for="new-all-instance-role" style="margin:0;font-size:12px;">Grant all instances as</label>
+        <select id="new-all-instance-role" style="width:150px;" onchange="applyAllInstanceRoles('new', this.value)">
+          <option value="">Choose access</option><option value="readonly">Read-only</option><option value="operator">Operator</option>
+        </select>
+        <input type="hidden" name="new_all_instance_role" id="new-all-instance-role-value">
+        <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;"><input type="checkbox" id="new-all-notifications" onchange="applyAllNotificationAccess('new', this.checked)"> Allow Owner webhook</label>
+      </div>
       {% for monitored_instance in access_instances %}
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;">
         <label for="new-instance-role-{{ monitored_instance.pk }}" style="margin:0;min-width:0;overflow-wrap:anywhere;">{{ monitored_instance.name }} <span class="section-hint">({{ monitored_instance.db_identifier }})</span></label>
-        <select id="new-instance-role-{{ monitored_instance.pk }}" name="new_instance_role_{{ monitored_instance.pk }}" style="width:140px;flex:0 0 140px;">
-          <option value="">No access</option>
-          <option value="readonly">Read-only</option>
-          <option value="operator">Operator</option>
-        </select>
+        <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto;">
+          <select id="new-instance-role-{{ monitored_instance.pk }}" name="new_instance_role_{{ monitored_instance.pk }}" style="width:140px;">
+            <option value="">No access</option><option value="readonly">Read-only</option><option value="operator">Operator</option>
+          </select>
+          <label title="Allow this operator to manage the owner Teams webhook" style="display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;"><input type="checkbox" name="new_instance_notifications_{{ monitored_instance.pk }}" data-notification-role="new-instance-role-{{ monitored_instance.pk }}"> Owner webhook</label>
+        </div>
       </div>
       {% empty %}<div class="section-hint">Add an instance first to assign access.</div>{% endfor %}
     </fieldset>
@@ -53,7 +66,23 @@
       <tr>
         <td data-label="Username"><strong>{{ account.username }}</strong></td>
         <td data-label="Email">{{ account.email|default:"—" }}</td>
-        <td data-label="Role">{% if account.is_superuser %}Administrator{% elif account.is_staff %}Operator{% else %}Read-only{% endif %}</td>
+        <td data-label="Role">
+          {% if account.is_superuser %}
+            <span class="badge badge-ok">Administrator</span>
+          {% else %}
+            <form method="post" style="display:flex;align-items:center;gap:6px;min-width:145px;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="update_user_role">
+              <input type="hidden" name="user_id" value="{{ account.pk }}">
+              <select name="role" style="width:105px;">
+                <option value="readonly" {% if not account.is_staff %}selected{% endif %}>Read-only</option>
+                <option value="operator" {% if account.is_staff %}selected{% endif %}>Operator</option>
+              </select>
+              {% if account.is_staff %}<label title="Allow access to global notification settings" style="display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;"><input type="checkbox" name="can_manage_global_notifications" value="1" {% if account.instance_access_scope.can_manage_global_notifications %}checked{% endif %}> Global settings</label>{% endif %}
+              <button class="btn btn-ghost btn-sm" type="submit" title="Save role">Save</button>
+            </form>
+          {% endif %}
+        </td>
         <td data-label="Status">{% if account.is_active %}<span class="badge badge-ok">active</span>{% else %}<span class="badge badge-muted">disabled</span>{% endif %}</td>
         <td data-label="MFA">{% if account.mfa_profile.enabled %}<span class="badge badge-ok">enabled</span>{% else %}<span class="badge badge-warn">pending</span>{% endif %}</td>
         <td data-label="Instance access">
@@ -64,14 +93,23 @@
               {% csrf_token %}
               <input type="hidden" name="action" value="update_instance_access">
               <input type="hidden" name="user_id" value="{{ account.pk }}">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;background:var(--surface-alt);border-radius:var(--radius-sm);">
+                <label for="all-instance-role-{{ account.pk }}" style="margin:0;font-size:12px;">Grant all as</label>
+                <select id="all-instance-role-{{ account.pk }}" style="width:125px;" onchange="applyAllInstanceRoles('{{ account.pk }}', this.value)">
+                  <option value="">Choose access</option><option value="readonly">Read-only</option><option value="operator">Operator</option>
+                </select>
+                <input type="hidden" name="all_instance_role" id="all-instance-role-value-{{ account.pk }}">
+                {% if account.is_staff %}<label style="display:flex;align-items:center;gap:5px;margin:0;font-size:11px;"><input type="checkbox" onchange="applyAllNotificationAccess('{{ account.pk }}', this.checked)"> Owner webhook</label>{% endif %}
+              </div>
               {% for access_row in account.instance_access_rows %}
               <label for="access-{{ account.pk }}-{{ access_row.instance.pk }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;font-size:12px;">
                 <span style="min-width:0;overflow-wrap:anywhere;">{{ access_row.instance.name }}</span>
-                <select id="access-{{ account.pk }}-{{ access_row.instance.pk }}" name="instance_role_{{ access_row.instance.pk }}" style="width:115px;flex:0 0 115px;">
+                <select id="access-{{ account.pk }}-{{ access_row.instance.pk }}" name="instance_role_{{ access_row.instance.pk }}" data-access-group="{{ account.pk }}" style="width:115px;flex:0 0 115px;">
                   <option value="" {% if not access_row.role %}selected{% endif %}>No access</option>
                   <option value="readonly" {% if access_row.role == "readonly" %}selected{% endif %}>Read-only</option>
                   {% if account.is_staff %}<option value="operator" {% if access_row.role == "operator" %}selected{% endif %}>Operator</option>{% endif %}
                 </select>
+                {% if account.is_staff %}<label title="Allow this operator to manage the owner Teams webhook" style="display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;"><input type="checkbox" name="instance_notifications_{{ access_row.instance.pk }}" data-notification-role="access-{{ account.pk }}-{{ access_row.instance.pk }}" {% if access_row.can_manage_notifications %}checked{% endif %}> Owner webhook</label>{% endif %}
               </label>
               {% empty %}<span class="section-hint">No active instances.</span>{% endfor %}
               <button class="btn btn-ghost btn-sm" type="submit">Save instance access</button>
@@ -100,11 +138,44 @@
   </table>
 </div>
 <script>
+  function applyAllInstanceRoles(group, value) {
+    var selector = group === 'new' ? '[id^="new-instance-role-"]' : 'select[data-access-group="' + group + '"]';
+    document.querySelectorAll(selector).forEach(function (select) { select.value = value; });
+    var hidden = document.getElementById(group === 'new' ? 'new-all-instance-role-value' : 'all-instance-role-value-' + group);
+    if (hidden) hidden.value = value;
+    syncNotificationInputs(group);
+  }
+  function applyAllNotificationAccess(group, checked) {
+    var selector = group === 'new' ? 'input[data-notification-role^="new-instance-role-"]' : 'input[data-notification-role^="access-' + group + '-"]';
+    document.querySelectorAll(selector).forEach(function (input) { if (!input.disabled) input.checked = checked; });
+  }
+  function syncNotificationInputs(group) {
+    var selector = group === 'new' ? 'input[data-notification-role^="new-instance-role-"]' : 'input[data-notification-role^="access-' + group + '-"]';
+    document.querySelectorAll(selector).forEach(function (input) {
+      var role = document.getElementById(input.dataset.notificationRole);
+      input.disabled = !role || role.value !== 'operator';
+      if (input.disabled) input.checked = false;
+    });
+  }
+  document.querySelectorAll('[data-notification-role]').forEach(function (input) {
+    var role = document.getElementById(input.dataset.notificationRole);
+    if (role) role.addEventListener('change', function () { syncNotificationInputs(role.id.indexOf('new-') === 0 ? 'new' : role.dataset.accessGroup); });
+  });
+  syncNotificationInputs('new');
+  document.querySelectorAll('[data-access-group]').forEach(function (select) { syncNotificationInputs(select.dataset.accessGroup); });
   function syncSlotGrantInputs() {
     var grants = document.getElementById('new-slot-grants');
     grants.disabled = document.getElementById('id_role').value !== 'operator';
     if (grants.disabled) grants.querySelectorAll('input').forEach(function (input) { input.checked = false; });
   }
+  function syncGlobalNotificationGrant() {
+    var wrapper = document.getElementById('new-global-notification-grant');
+    var checkbox = wrapper && wrapper.querySelector('input');
+    var enabled = document.getElementById('id_role').value === 'operator';
+    if (wrapper) wrapper.style.opacity = enabled ? '1' : '.55';
+    if (checkbox) { checkbox.disabled = !enabled; if (!enabled) checkbox.checked = false; }
+  }
   syncSlotGrantInputs();
+  syncGlobalNotificationGrant();
 </script>
 {% endblock %}

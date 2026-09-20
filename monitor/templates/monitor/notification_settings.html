@@ -61,7 +61,7 @@
       Notifications are summarized per database. The first card lists active PID pairs, and the same PID pair is not posted again while it remains blocked. A new or cleared PID pair can produce a summary, and one final card is sent when all tracked locks clear. Unchanged locks do not generate heartbeat duplicates. Active locks are never removed; resolved records are cleaned daily after the retention period.
     </div>
 
-    <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">
+    {% if user.is_superuser %}<div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">
       <div class="card-title" style="font-size:14px;">Exclude database from global Teams notifications</div>
       <div class="section-hint" style="margin-top:6px;line-height:1.45;">Select databases that must not send real-time lock or long-query cards to the shared channel. Weekly reports still include their lock history. Owner webhooks, monitoring, dashboard history, and instance-specific reports are unaffected.</div>
       <div class="form-grid" style="margin-top:12px;">
@@ -72,7 +72,7 @@
         </label>
         {% empty %}<span class="section-hint">No active instances are registered.</span>{% endfor %}
       </div>
-    </div>
+    </div>{% endif %}
 
     <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:18px;">
       <div class="card-title" style="font-size:14px;">Long-running manual queries</div>

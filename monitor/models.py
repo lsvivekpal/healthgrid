@@ -77,6 +77,10 @@ class UserInstanceAccess(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="instance_access_grants")
     instance = models.ForeignKey(RDSInstance, on_delete=models.CASCADE, related_name="user_access_grants")
     role = models.CharField(max_length=16, choices=ROLE_CHOICES)
+    can_manage_notifications = models.BooleanField(
+        default=False,
+        help_text="Allow this operator to manage the instance owner Teams webhook",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -91,6 +95,10 @@ class UserInstanceAccessScope(models.Model):
     """Marks that an account uses explicit per-instance access control."""
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="instance_access_scope")
+    can_manage_global_notifications = models.BooleanField(
+        default=False,
+        help_text="Allow this operator to manage global notification settings",
+    )
     configured_at = models.DateTimeField(auto_now=True)
 
 

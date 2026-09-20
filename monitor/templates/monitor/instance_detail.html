@@ -61,18 +61,18 @@
       </form>
       {% endif %}
     </div>
-    <form method="post" action="{% url 'instance-owner-webhook' instance.pk %}" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
+    {% if can_manage_notifications %}<form method="post" action="{% url 'instance-owner-webhook' instance.pk %}" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
       {% csrf_token %}
       <div class="owner-webhook-field">
         <label for="id_owner_teams_webhook_url" style="margin:0 0 6px;">Owner Teams webhook</label>
         <input type="url" name="owner_teams_webhook_url" id="id_owner_teams_webhook_url" value="{{ instance.owner_teams_webhook_url }}" placeholder="https://..." autocomplete="off">
       </div>
-      <label style="display:flex;align-items:flex-start;gap:8px;margin:0;max-width:330px;font-weight:400;">
+      {% if user.is_superuser %}<label style="display:flex;align-items:flex-start;gap:8px;margin:0;max-width:330px;font-weight:400;">
         <input type="checkbox" name="exclude_from_global_notifications" value="1" {% if instance.exclude_from_global_notifications %}checked{% endif %} style="width:auto;margin-top:3px;">
-        <span>Exclude from real-time global Teams alerts <span class="section-hint" style="display:block;line-height:1.35;">Weekly reports and owner notifications continue.</span></span>
-      </label>
+        <span>Exclude from real-time global Teams alerts <span class="section-hint" style="display:block;line-height:1.35;">Administrator-only. Weekly reports and owner notifications continue.</span></span>
+      </label>{% elif instance.exclude_from_global_notifications %}<span class="section-hint">Global Teams exclusion is enabled by an Administrator.</span>{% endif %}
       <button class="btn btn-ghost btn-sm" type="submit">Save owner webhook</button>
-    </form>
+    </form>{% endif %}
     <style>
       .control-credentials-panel { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
       .control-credentials-heading { display:flex; align-items:center; gap:8px; margin-bottom:5px; font-size:13.5px; font-weight:700; color:var(--text); }
@@ -122,7 +122,7 @@
     {% else %}
     <div class="section-hint" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">Dedicated lock-control credentials are Administrator-only and disabled unless explicitly enabled. This instance currently uses regular DB credentials for monitoring and lock actions.</div>
     {% endif %}
-    <form method="post" action="{% url 'test-notification' %}" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    {% if can_manage_notifications %}<form method="post" action="{% url 'test-notification' %}" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       {% csrf_token %}
       <input type="hidden" name="destination" value="owner chat">
       <input type="hidden" name="webhook_url" value="{{ instance.owner_teams_webhook_url }}">
@@ -130,7 +130,7 @@
       <input type="hidden" name="instance_id" value="{{ instance.pk }}">
       <button class="btn btn-ghost btn-sm" type="submit">Send test to owner chat</button>
       <span class="section-hint">Uses the saved webhook above.</span>
-    </form>
+    </form>{% endif %}
   {% endif %}
 </div>
 
