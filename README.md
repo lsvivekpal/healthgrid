@@ -279,7 +279,7 @@ Operators and Administrators can use **Add instance** to configure a friendly na
 
 Use **Test connection** before saving. Existing instance pages support rename, duplicate, and owner-webhook update/test. Administrators can enable, update, and test dedicated lock-control credentials. When disabled, monitoring and control actions use the regular DB credentials.
 
-Administrators can assign each non-administrator account access to individual instances from **User management**, or use **Grant all instances as** to apply Read-only or Operator access in one action. Operators can additionally receive the per-instance **notification management** permission. This permission controls whether they can change the owner Teams webhook and the instance's global-channel exclusion; it does not change which Teams destinations the monitor sends to. Read-only accounts cannot change notification settings. Older staff accounts without an explicit instance-access scope retain their previous access until an Administrator assigns a scope.
+Administrators can assign each non-administrator account access to individual instances from **User management**, or use **Grant all instances as** to apply Read-only or Operator access in one action. Operators can additionally receive the per-instance **Owner webhook** permission. This permission controls whether they can change the owner Teams webhook; shared/global-channel exclusion remains Administrator-only. Read-only accounts cannot change notification settings. Older staff accounts without an explicit instance-access scope retain their previous access until an Administrator assigns a scope.
 
 Global Notification settings access is a separate Administrator-granted permission and is disabled by default for Operators. The **Exclude from real-time global Teams alerts** control is Administrator-only on the Add instance form, instance page, and global notification settings. Operators can optionally receive per-instance Owner webhook permission, but cannot disable shared-channel alerts. Changing an account from Operator to Read-only removes its operator actions, global notification permission, per-instance notification permissions, and replication-slot permissions.
 
@@ -377,9 +377,10 @@ Administrator means an active Django superuser with staff access—not a usernam
 | Capability | Administrator | Operator | Read-only |
 | --- | --- | --- | --- |
 | View dashboard/locks/sessions/slots/audits and export CSV | All instances | Assigned instances | Assigned instances |
-| Add/duplicate/rename instances; edit credentials/webhooks | Yes | Yes, assigned instances | No |
+| Add/duplicate/rename instances; edit credentials/owner webhooks | Yes | Yes, assigned instances with Owner webhook permission | No |
 | Enable/configure dedicated lock-control credentials | Yes | No | No |
-| Configure notifications; send tests/manual reports | Yes | Yes | No |
+| Configure global notifications; send shared-channel tests/reports | Yes, including exclusion | Only with explicit global permission; exclusion unavailable | No |
+| Exclude an instance from global Teams alerts | Yes | No | No |
 | Individual lock kill | Yes | Yes, assigned instances | No |
 | Live-session and bulk/chain kills | Yes, MFA | Yes, MFA, assigned instances | No |
 | Terminate slot backend | Yes | Explicit terminate grant | No |
@@ -394,9 +395,10 @@ Application authorization never overrides the connected PostgreSQL role's privil
 As Administrator, open account menu → **User management**:
 
 1. Create an Operator or Read-only account with a temporary password. Optional email is contact information, not a Teams destination.
-2. In **Instance access**, choose **Read-only** or **Operator** for each instance. **No access** leaves that instance hidden from the user.
-3. Optionally grant an operator **Terminate slot backend** and/or **Drop slot**.
-4. For existing users, use the **Instance access** controls in the user table and select **Save access**. The selected role applies only to those instances.
+2. Switch an account between **Read-only** and **Operator** using the role control. Switching to Read-only revokes operator actions, notification permissions, and slot permissions.
+3. In **Instance access**, choose **Read-only** or **Operator** for each instance, or use **Grant all instances as**. **No access** leaves that instance hidden from the user.
+4. Optionally grant an operator **Owner webhook**, **Terminate slot backend**, and/or **Drop slot** permissions.
+5. Grant **Global notification settings** only when an Operator should manage global thresholds, schedules, and webhooks. Excluding an instance from the shared channel is always Administrator-only.
 
 Both grants default to off and are independent. Drop permission does not include termination; an active slot may require an independently authorized termination first. Revocation is enforced on subsequent requests. Grant changes are audited. Read-only/inactive users cannot exercise grants even if records exist.
 
