@@ -23,10 +23,14 @@
   #card-grid > div > .instance-card { width:100%; height:100%; box-sizing:border-box; }
   .dashboard-links-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; align-items:stretch; }
   .dashboard-links-grid > .dashboard-link-tile { height:100%; box-sizing:border-box; }
-  .database-summary-row:hover { border-color:var(--brand) !important; background:var(--brand-soft); }
-  .database-summary-row { overflow-x:auto; scrollbar-width:thin; }
-  .database-summary-row.has-locks { border-color:var(--danger-border) !important; background:var(--danger-bg); }
-  .database-summary-row.has-locks:hover { background:var(--danger-bg); }
+  .database-row-shell { overflow-x:auto; scrollbar-width:thin; }
+  .database-row-shell:hover { border-color:var(--brand) !important; }
+  .database-row-shell.has-locks { border-color:var(--danger-border) !important; background:var(--danger-bg); }
+  .database-row-shell.has-locks:hover { background:var(--danger-bg); }
+  .database-summary-row { min-width:max-content; flex:1 0 auto; }
+  .database-summary-row:hover { background:var(--brand-soft); }
+  .database-row-shell.has-locks .database-summary-row:hover { background:transparent; }
+  .database-remove-form { flex:0 0 auto; padding-right:3px; }
   .instance-group-card .section-hint { line-height:1.35; }
   .instance-group-card .group-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(92px,1fr)); gap:7px; margin-top:13px; }
   .add-instance-fab { position:fixed; right:24px; bottom:24px; z-index:20; width:52px; height:52px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; color:#fff; background:var(--brand); box-shadow:0 8px 22px rgba(15,23,42,.22),0 2px 6px rgba(15,23,42,.16); transition:transform 140ms ease,box-shadow 140ms ease,background 140ms ease; }
@@ -54,9 +58,7 @@
   <div class="instance-heading">
     <div class="instance-title-row">
       <h2 style="margin:0;">Database instances</h2>
-      {% if user.is_superuser %}
-        <button type="button" id="arrange-tiles-toggle" class="btn btn-ghost btn-sm" onclick="toggleTileArrange()" title="Rearrange dashboard tiles">Arrange tiles</button>
-      {% endif %}
+      <button type="button" id="arrange-tiles-toggle" class="btn btn-ghost btn-sm" onclick="toggleTileArrange()" title="Rearrange dashboard tiles">Arrange tiles</button>
     </div>
     <div class="instance-subtitle-row">
       <span class="live-dot" aria-hidden="true"></span>
@@ -317,7 +319,6 @@
     setKpiState('stat-blocked', 'tile-blocked', 'stat-blocked-icon', 'danger');
     setKpiState('stat-unreachable', 'tile-unreachable', 'stat-unreachable-icon', 'warn');
   }
-  {% if user.is_superuser %}
   var tileArrangeMode = false;
   var draggedTile = null;
   function tileContainers() {
@@ -370,13 +371,12 @@
   document.addEventListener('click', function (event) {
     if (tileArrangeMode && event.target.closest && event.target.closest('#card-grid')) { event.preventDefault(); event.stopPropagation(); }
   }, true);
-  {% endif %}
   document.body.addEventListener('htmx:afterSettle', function (evt) {
     if (evt.target && evt.target.closest('#card-grid')) {
       recomputeStats();
       var updated = document.getElementById('list-last-updated');
       if (updated) updated.textContent = 'updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
-      {% if user.is_superuser %}wireTileDragging();{% endif %}
+      wireTileDragging();
     }
   });
   document.body.addEventListener('htmx:beforeRequest', function (evt) {
