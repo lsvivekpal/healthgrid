@@ -193,8 +193,19 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 @login_required
 def instance_list(request):
     instances = accessible_instances(request.user)
+    grouped = {}
+    for instance in instances.order_by("connection_group", "name", "db_name"):
+        grouped.setdefault(instance.connection_group, []).append(instance)
+    instance_groups = [
+        {"group_id": group_id, "instance": members[0], "database_count": len(members)}
+        for group_id, members in grouped.items()
+    ]
     links = DashboardLink.objects.filter(is_active=True)
-    return render(request, "monitor/instance_list.html", {"instances": instances, "dashboard_links": links})
+    return render(request, "monitor/instance_list.html", {
+        "instances": instances,
+        "instance_groups": instance_groups,
+        "dashboard_links": links,
+    })
 
 
 @login_required
@@ -569,6 +580,55 @@ def instance_card_partial(request, pk):
     except db.ConnectionError as exc:
         ctx.update(reachable=False, error=str(exc))
     return render(request, "monitor/partials/instance_card.html", ctx)
+
+
+@login_required
+def instance_group_card_partial(request, group_id):
+    """Render one instance card containing the live summaries for its databases."""
+    instances = list(
+        accessible_instances(request.user)
+        .filter(connection_group=group_id)
+        .order_by("name", "db_name")
+    )
+    if not instances:
+        raise Http404("Instance group not found")
+
+    databases = []
+    for instance in instances:
+        item = {"instance": instance, "reachable": False, "total": 0, "active": 0, "idle": 0, "locks": 0}
+        try:
+            activity, blocking = db.fetch_activity(instance)
+            active = sum(1 for row in activity if str(row.get("state") or "").casefold() == "active")
+            item.update(
+                reachable=True,
+                total=len(activity),
+                active=active,
+                idle=max(0, len(activity) - active),
+                locks=len(blocking),
+            )
+        except db.ConnectionError as exc:
+            item["error"] = str(exc)
+        databases.append(item)
+
+    aggregate = {
+        "total": sum(item["total"] for item in databases),
+        "active": sum(item["active"] for item in databases),
+        "idle": sum(item["idle"] for item in databases),
+        "locks": sum(item["locks"] for item in databases),
+    }
+    status = "critical" if aggregate["locks"] else "warning" if any(
+        not item["reachable"] for item in databases
+    ) else "healthy"
+
+    return render(request, "monitor/partials/instance_group_card.html", {
+        "instance": instances[0],
+        "databases": databases[:6],
+        "additional_databases": databases[6:],
+        "database_count": len(databases),
+        "can_operate_instance": can_operate_instance(request.user, instances[0]),
+        "aggregate": aggregate,
+        "status": status,
+    })
 
 
 @login_required
@@ -1048,9 +1108,11 @@ def rename_instance(request, pk):
         return redirect("instance-detail", pk=instance.pk)
 
     old_name = instance.name
-    instance.name = new_name
-    instance.save(update_fields=["name"])
-    _log_audit(instance, "rename_instance", request.user, detail=f"{old_name} -> {new_name}")
+    siblings = list(RDSInstance.objects.filter(connection_group=instance.connection_group))
+    with transaction.atomic():
+        RDSInstance.objects.filter(connection_group=instance.connection_group).update(name=new_name)
+        for sibling in siblings:
+            _log_audit(sibling, "rename_instance", request.user, detail=f"{old_name} -> {new_name}")
     messages.success(request, f"Renamed to {new_name}.")
     return redirect("instance-detail", pk=instance.pk)
 
@@ -1127,4 +1189,27 @@ def remove_instance(request, pk):
     _log_audit(instance, "remove_instance", request.user, detail=instance.db_identifier)
     instance.delete()
     messages.success(request, "Instance removed.")
+    return redirect("instance-list")
+
+
+@login_required
+@require_POST
+def remove_instance_group(request, group_id):
+    """Remove an instance and all database targets registered under it."""
+    _require_administrator(request)
+    instances = list(
+        RDSInstance.objects.filter(is_active=True, connection_group=group_id).order_by("id")
+    )
+    if not instances:
+        raise Http404("Instance group not found")
+    representative = instances[0]
+    if not _require_action_mfa(
+        request, representative, "remove_instance", detail=representative.db_identifier, require_code=True
+    ):
+        return redirect("instance-list")
+    with transaction.atomic():
+        for instance in instances:
+            _log_audit(instance, "remove_instance", request.user, detail=instance.db_identifier)
+        RDSInstance.objects.filter(pk__in=[instance.pk for instance in instances]).delete()
+    messages.success(request, f"Removed instance and {len(instances)} database target(s).")
     return redirect("instance-list")

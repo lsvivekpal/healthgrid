@@ -23,6 +23,12 @@
   #card-grid > div > .instance-card { width:100%; height:100%; box-sizing:border-box; }
   .dashboard-links-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; align-items:stretch; }
   .dashboard-links-grid > .dashboard-link-tile { height:100%; box-sizing:border-box; }
+  .database-summary-row:hover { border-color:var(--brand) !important; background:var(--brand-soft); }
+  .database-summary-row { overflow-x:auto; scrollbar-width:thin; }
+  .database-summary-row.has-locks { border-color:var(--danger-border) !important; background:var(--danger-bg); }
+  .database-summary-row.has-locks:hover { background:var(--danger-bg); }
+  .instance-group-card .section-hint { line-height:1.35; }
+  .instance-group-card .group-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(92px,1fr)); gap:7px; margin-top:13px; }
   .add-instance-fab { position:fixed; right:24px; bottom:24px; z-index:20; width:52px; height:52px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; color:#fff; background:var(--brand); box-shadow:0 8px 22px rgba(15,23,42,.22),0 2px 6px rgba(15,23,42,.16); transition:transform 140ms ease,box-shadow 140ms ease,background 140ms ease; }
   .add-instance-fab:hover { color:#fff; background:var(--brand-hover,var(--brand)); transform:translateY(-2px); box-shadow:0 11px 26px rgba(15,23,42,.26),0 3px 8px rgba(15,23,42,.18); }
   .add-instance-fab:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
@@ -40,12 +46,14 @@
     .refresh-status { flex:1 1 100%; justify-content:flex-start; }
     .refresh-preferences { flex:1 1 auto; justify-content:space-between; min-height:40px; }
     .refresh-preferences input[type=number] { min-height:32px !important; }
+    .instance-group-card .group-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .database-summary-row .section-hint { font-size:11px; }
   }
 </style>
 <div class="page-header-row" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0;flex-wrap:wrap;gap:10px;">
   <div class="instance-heading">
     <div class="instance-title-row">
-      <h2 style="margin:0;">RDS Instances</h2>
+      <h2 style="margin:0;">Database instances</h2>
       {% if user.is_superuser %}
         <button type="button" id="arrange-tiles-toggle" class="btn btn-ghost btn-sm" onclick="toggleTileArrange()" title="Rearrange dashboard tiles">Arrange tiles</button>
       {% endif %}
@@ -88,13 +96,13 @@
   </div>
 </div>
 
-{% if instances %}
+{% if instance_groups %}
 <div id="stats-bar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:20px 0 24px;align-items:stretch;">
   <div id="tile-total" class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
     <span class="kpi-icon" style="background:var(--brand-soft);color:var(--brand);">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
     </span>
-    <div><div class="section-hint">Total instances</div><div id="stat-total" class="kpi-num">{{ instances|length }}</div></div>
+    <div><div class="section-hint">Total instances</div><div id="stat-total" class="kpi-num">{{ instance_groups|length }}</div></div>
   </div>
   <div id="tile-healthy" class="card kpi" style="margin-bottom:0;padding:16px;display:flex;align-items:center;gap:13px;">
     <span class="kpi-icon" style="background:var(--ok-bg);color:var(--ok-fg);">
@@ -125,21 +133,21 @@
 </style>
 {% endif %}
 
-{% if not instances %}
+{% if not instance_groups %}
   <div class="empty-state card">
     <span class="empty-icon">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
     </span>
     <h3>No instances registered yet</h3>
-    <p>Add an RDS Postgres endpoint to start monitoring locks and sessions.</p>
+    <p>Add a database instance to start monitoring locks and sessions.</p>
     {% if user.is_staff %}<a class="btn btn-primary" href="{% url 'instance-add' %}">Add your first instance</a>{% endif %}
   </div>
 {% endif %}
 
 <div id="card-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:14px;align-items:stretch;">
-  {% for instance in instances %}
-    <div id="card-{{ instance.pk }}"
-         hx-get="{% url 'instance-card' instance.pk %}"
+  {% for group in instance_groups %}
+    <div id="group-card-{{ group.group_id }}"
+         hx-get="{% url 'instance-group-card' group.group_id %}"
          hx-trigger="load, refresh"
          hx-swap="innerHTML"
          hx-indicator="#list-refresh-spinner">

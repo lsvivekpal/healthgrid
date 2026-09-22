@@ -211,6 +211,37 @@ class AddInstanceAuditTests(TestCase):
         self.assertEqual(len({instance.connection_group for instance in instances}), 1)
 
 
+class InstanceGroupingTests(TestCase):
+    def test_dashboard_groups_databases_by_connection_group(self):
+        staff = User.objects.create_user("group-staffer", password="pw", is_staff=True)
+        first = make_instance(name="QA", db_identifier="qa", db_name="lms")
+        make_instance(name="QA", db_identifier="qa", db_name="los", connection_group=first.connection_group)
+        self.client.login(username="group-staffer", password="pw")
+
+        response = self.client.get(reverse("instance-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["instance_groups"]), 1)
+        self.assertEqual(response.context["instance_groups"][0]["database_count"], 2)
+
+    @patch("monitor.views.db.fetch_activity")
+    def test_group_card_aggregates_database_activity(self, fetch_activity):
+        staff = User.objects.create_user("group-card-staffer", password="pw", is_staff=True)
+        first = make_instance(name="QA", db_identifier="qa", db_name="lms")
+        make_instance(name="QA", db_identifier="qa", db_name="los", connection_group=first.connection_group)
+        fetch_activity.side_effect = [
+            ([{"state": "active"}, {"state": "idle"}], []),
+            ([{"state": "active"}], [{"blocked_pid": 1, "blocking_pid": 2}]),
+        ]
+        self.client.login(username="group-card-staffer", password="pw")
+
+        response = self.client.get(reverse("instance-group-card", args=[first.connection_group]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["aggregate"], {"total": 3, "active": 2, "idle": 1, "locks": 1})
+        self.assertEqual(response.context["status"], "critical")
+
+
 class MFASecurityTests(TestCase):
     def setUp(self):
         self.instance = make_instance()

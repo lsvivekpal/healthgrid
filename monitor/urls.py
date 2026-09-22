@@ -23,6 +23,7 @@ urlpatterns = [
     path("reports/weekly/<str:token>/", views.download_weekly_report, name="download-weekly-report"),
     path("instances/<int:pk>/", views.instance_detail, name="instance-detail"),
     path("instances/<int:pk>/card/", views.instance_card_partial, name="instance-card"),
+    path("instances/group/<uuid:group_id>/card/", views.instance_group_card_partial, name="instance-group-card"),
     path("instances/<int:pk>/activity/", views.activity_table_partial, name="instance-activity"),
     path("instances/<int:pk>/replication-slots/", views.replication_slots_partial, name="instance-replication-slots"),
     path("instances/<int:pk>/replication-slots/kill/", views.kill_replication_slot, name="instance-kill-replication-slot"),
@@ -37,4 +38,5 @@ urlpatterns = [
     path("instances/<int:pk>/owner-webhook/", views.update_owner_webhook, name="instance-owner-webhook"),
     path("instances/<int:pk>/control-credentials/", views.update_control_credentials, name="instance-control-credentials"),
     path("instances/<int:pk>/remove/", views.remove_instance, name="instance-remove"),
+    path("instances/group/<uuid:group_id>/remove/", views.remove_instance_group, name="instance-group-remove"),
 ]
