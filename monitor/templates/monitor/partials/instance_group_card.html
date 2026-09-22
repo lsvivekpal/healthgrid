@@ -5,6 +5,9 @@
       <span style="overflow-wrap:anywhere;">{{ instance.name }}</span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;">
+      <a class="icon-btn" href="{% url 'instance-add' %}?extend={{ instance.pk }}" title="Add a database to this instance" aria-label="Add database to {{ instance.name }}">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M12 17v5"/><path d="M9.5 19.5h5"/></svg>
+      </a>
       <a class="icon-btn" href="{% url 'instance-detail' instance.pk %}" title="Manage and edit this instance" aria-label="Manage and edit {{ instance.name }}">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       </a>
@@ -17,7 +20,7 @@
       </form>
       {% endif %}
       {% if status == "critical" %}
-        <span class="badge badge-danger">{{ aggregate.locks }} blocked</span>
+        <span class="badge badge-danger">{% if server_overview %}{{ server_overview.locks }}{% else %}{{ aggregate.locks }}{% endif %} blocked</span>
       {% elif status == "warning" %}
         <span class="badge badge-warn">unreachable</span>
       {% else %}
@@ -32,10 +35,10 @@
 
   <div class="group-metrics">
     <span class="badge badge-muted" style="justify-content:center;">{{ database_count }} DB{{ database_count|pluralize }}</span>
-    <span class="badge badge-muted" style="justify-content:center;">{{ aggregate.total }} sessions</span>
-    <span class="badge badge-muted" style="justify-content:center;">{{ aggregate.active }} active</span>
-    <span class="badge badge-muted" style="justify-content:center;">{{ aggregate.idle }} idle</span>
-    {% if aggregate.locks %}<span class="badge badge-danger" style="justify-content:center;">{{ aggregate.locks }} lock{{ aggregate.locks|pluralize }}</span>{% else %}<span class="badge badge-ok" style="justify-content:center;">0 locks</span>{% endif %}
+    <span class="badge badge-muted" style="justify-content:center;">{% if server_overview %}{{ server_overview.total }}{% else %}{{ aggregate.total }}{% endif %} sessions</span>
+    <span class="badge badge-muted" style="justify-content:center;">{% if server_overview %}{{ server_overview.active }}{% else %}{{ aggregate.active }}{% endif %} active</span>
+    <span class="badge badge-muted" style="justify-content:center;">{% if server_overview %}{{ server_overview.idle }}{% else %}{{ aggregate.idle }}{% endif %} idle</span>
+    {% if server_overview.locks or aggregate.locks %}<span class="badge badge-danger" style="justify-content:center;">{% if server_overview %}{{ server_overview.locks }}{% else %}{{ aggregate.locks }}{% endif %} lock{{ server_overview.locks|pluralize }}</span>{% else %}<span class="badge badge-ok" style="justify-content:center;">0 locks</span>{% endif %}
   </div>
 
   <div style="margin-top:15px;">
@@ -67,4 +70,26 @@
     </div>
   </div>
   <div class="section-hint" style="margin-top:10px;text-align:right;">Select a database to view sessions, locks, and queries →</div>
+  {% if server_overview %}
+  <div class="server-overview-panel" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+      <strong style="font-size:12px;">Server-wide totals</strong>
+      <span class="section-hint">read-only discovery</span>
+    </div>
+    <div class="section-hint" style="margin-top:4px;">{{ server_overview.total }} sessions · {{ server_overview.locks }} locks across {{ server_overview.databases|length }} databases</div>
+    {% if discovered_databases %}
+    <div class="section-hint" style="font-weight:700;margin-top:10px;margin-bottom:6px;">Discovered databases not registered</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      {% for database in discovered_databases|slice:":6" %}
+      <span class="badge {% if database.locks %}badge-danger{% else %}badge-muted{% endif %}" title="{{ database.total }} sessions, {{ database.locks }} locks">{{ database.name }} · {{ database.locks }} lock{{ database.locks|pluralize }}</span>
+      {% endfor %}
+      {% if discovered_databases|length > 6 %}<span class="badge badge-muted">+{{ discovered_databases|length|add:"-6" }} more</span>{% endif %}
+    </div>
+    {% else %}
+    <div class="section-hint" style="margin-top:8px;">All discovered databases are registered for detailed monitoring.</div>
+    {% endif %}
+  </div>
+  {% elif discovery_error %}
+  <div class="section-hint" style="margin-top:12px;">Server-wide discovery unavailable: {{ discovery_error }}</div>
+  {% endif %}
 </div>

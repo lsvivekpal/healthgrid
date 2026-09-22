@@ -88,6 +88,46 @@ TOP_TABLES_QUERY = """
     LIMIT 10;
 """
 
+SERVER_DATABASES_QUERY = """
+    SELECT datname AS database_name
+    FROM pg_database
+    WHERE datallowconn AND NOT datistemplate
+    ORDER BY datname;
+"""
+
+SERVER_ACTIVITY_COUNTS_QUERY = """
+    SELECT datname AS database_name,
+           COUNT(*) AS total_sessions,
+           COUNT(*) FILTER (WHERE state = 'active') AS active_sessions,
+           COUNT(*) FILTER (WHERE state IN ('idle', 'idle in transaction', 'idle in transaction (aborted)')) AS idle_sessions
+    FROM pg_stat_activity
+    WHERE datname IS NOT NULL AND pid <> pg_backend_pid()
+    GROUP BY datname;
+"""
+
+SERVER_LOCK_COUNTS_QUERY = """
+    SELECT blocked_activity.datname AS database_name, COUNT(*) AS lock_count
+    FROM pg_catalog.pg_locks blocked_locks
+    JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked_locks.pid
+    JOIN pg_catalog.pg_locks blocking_locks
+        ON blocking_locks.locktype = blocked_locks.locktype
+        AND blocking_locks.database IS NOT DISTINCT FROM blocked_locks.database
+        AND blocking_locks.relation IS NOT DISTINCT FROM blocked_locks.relation
+        AND blocking_locks.page IS NOT DISTINCT FROM blocked_locks.page
+        AND blocking_locks.tuple IS NOT DISTINCT FROM blocked_locks.tuple
+        AND blocking_locks.virtualxid IS NOT DISTINCT FROM blocked_locks.virtualxid
+        AND blocking_locks.transactionid IS NOT DISTINCT FROM blocked_locks.transactionid
+        AND blocking_locks.classid IS NOT DISTINCT FROM blocked_locks.classid
+        AND blocking_locks.objid IS NOT DISTINCT FROM blocked_locks.objid
+        AND blocking_locks.objsubid IS NOT DISTINCT FROM blocked_locks.objsubid
+        AND blocking_locks.pid != blocked_locks.pid
+    JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking_locks.pid
+    WHERE NOT blocked_locks.granted
+      AND blocked_activity.datname IS NOT NULL
+      AND blocked_activity.datname = blocking_activity.datname
+    GROUP BY blocked_activity.datname;
+"""
+
 
 # pg_current_wal_lsn() only works on a primary; guard it so this doesn't error
 # out when the monitored instance is a read replica.
@@ -256,6 +296,41 @@ def fetch_activity(instance):
             cur.execute(BLOCKING_QUERY)
             blocking = list(cur.fetchall())
         return activity, blocking
+    finally:
+        conn.close()
+
+
+def fetch_server_overview(instance):
+    """Return read-only database/session/lock totals for a PostgreSQL endpoint."""
+    if _is_mysql(instance):
+        raise ConnectionError("Server-wide database discovery is currently available for PostgreSQL endpoints only.")
+    conn = get_connection(instance)
+    try:
+        conn.set_session(readonly=True, autocommit=True)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(SERVER_DATABASES_QUERY)
+            database_names = [row["database_name"] for row in cur.fetchall()]
+            cur.execute(SERVER_ACTIVITY_COUNTS_QUERY)
+            activity_counts = {row["database_name"]: row for row in cur.fetchall()}
+            cur.execute(SERVER_LOCK_COUNTS_QUERY)
+            lock_counts = {row["database_name"]: row["lock_count"] for row in cur.fetchall()}
+        databases = []
+        for name in database_names:
+            counts = activity_counts.get(name, {})
+            databases.append({
+                "name": name,
+                "total": int(counts.get("total_sessions") or 0),
+                "active": int(counts.get("active_sessions") or 0),
+                "idle": int(counts.get("idle_sessions") or 0),
+                "locks": int(lock_counts.get(name) or 0),
+            })
+        return {
+            "databases": databases,
+            "total": sum(item["total"] for item in databases),
+            "active": sum(item["active"] for item in databases),
+            "idle": sum(item["idle"] for item in databases),
+            "locks": sum(item["locks"] for item in databases),
+        }
     finally:
         conn.close()
 

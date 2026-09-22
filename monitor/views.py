@@ -619,12 +619,25 @@ def instance_group_card_partial(request, group_id):
     status = "critical" if aggregate["locks"] else "warning" if any(
         not item["reachable"] for item in databases
     ) else "healthy"
+    server_overview = None
+    discovery_error = None
+    try:
+        server_overview = db.fetch_server_overview(instances[0])
+        registered_names = {item["instance"].db_name for item in databases}
+        discovered = [item for item in server_overview["databases"] if item["name"] not in registered_names]
+        status = "critical" if server_overview["locks"] else status
+    except db.ConnectionError as exc:
+        discovery_error = str(exc)
+        discovered = []
 
     return render(request, "monitor/partials/instance_group_card.html", {
         "instance": instances[0],
         "databases": databases[:6],
         "additional_databases": databases[6:],
         "database_count": len(databases),
+        "discovered_databases": discovered,
+        "discovery_error": discovery_error,
+        "server_overview": server_overview,
         "can_operate_instance": can_operate_instance(request.user, instances[0]),
         "aggregate": aggregate,
         "status": status,
@@ -976,9 +989,26 @@ def kill_lock_chain(request, pk):
 def add_instance(request):
     _require_staff(request)
     if request.method == "POST":
-        lock_control_enabled = request.user.is_superuser and bool(request.POST.get("lock_control_enabled"))
-        control_username = request.POST.get("control_username", "").strip() if lock_control_enabled else ""
-        control_password = request.POST.get("control_password", "") if lock_control_enabled else ""
+        extend_source = None
+        extend_pk = request.POST.get("extend_instance")
+        if extend_pk:
+            extend_source = get_object_or_404(RDSInstance, pk=extend_pk)
+            _require_instance_access(request, extend_source, write=True)
+        lock_control_enabled = (
+            extend_source.lock_control_enabled
+            if extend_source
+            else request.user.is_superuser and bool(request.POST.get("lock_control_enabled"))
+        )
+        control_username = (
+            extend_source.control_username
+            if extend_source
+            else request.POST.get("control_username", "").strip() if lock_control_enabled else ""
+        )
+        control_password = (
+            extend_source.get_control_password()
+            if extend_source and extend_source.control_password_encrypted
+            else request.POST.get("control_password", "") if lock_control_enabled else ""
+        )
         database_names = [
             value.strip()
             for value in request.POST.get("database_names", request.POST.get("db_name", "")).replace("\n", ",").split(",")
@@ -989,7 +1019,19 @@ def add_instance(request):
             return render(request, "monitor/add_instance.html", {"prefill": {
                 key: request.POST.get(key, "")
                 for key in ("name", "engine", "db_identifier", "region", "host", "port", "database_names", "db_name", "username", "owner_teams_webhook_url")
-            }})
+                }})
+        if extend_source:
+            existing_names = set(
+                RDSInstance.objects.filter(connection_group=extend_source.connection_group)
+                .values_list("db_name", flat=True)
+            )
+            duplicates = sorted(set(database_names) & existing_names)
+            if duplicates:
+                messages.error(request, f"These databases are already registered: {', '.join(duplicates)}")
+                return render(request, "monitor/add_instance.html", {
+                    "prefill": {"database_names": ", ".join(database_names)},
+                    "extend_instance": extend_source.pk,
+                })
         if lock_control_enabled and control_username and not control_password:
             messages.error(request, "Lock-control password is required when a lock-control username is provided.")
             return render(request, "monitor/add_instance.html", {"prefill": {
@@ -998,13 +1040,13 @@ def add_instance(request):
             }})
         try:
             common = dict(
-                name=request.POST["name"].strip(),
-                engine=request.POST.get("engine", "postgresql"),
-                db_identifier=request.POST["db_identifier"].strip(),
-                region=request.POST.get("region", "us-east-1").strip(),
-                host=request.POST["host"].strip(),
-                port=request.POST.get("port") or (3306 if request.POST.get("engine") in {"mysql", "mariadb"} else 5432),
-                username=request.POST["username"].strip(),
+                name=extend_source.name if extend_source else request.POST["name"].strip(),
+                engine=extend_source.engine if extend_source else request.POST.get("engine", "postgresql"),
+                db_identifier=extend_source.db_identifier if extend_source else request.POST["db_identifier"].strip(),
+                region=extend_source.region if extend_source else request.POST.get("region", "us-east-1").strip(),
+                host=extend_source.host if extend_source else request.POST["host"].strip(),
+                port=extend_source.port if extend_source else request.POST.get("port") or (3306 if request.POST.get("engine") in {"mysql", "mariadb"} else 5432),
+                username=extend_source.username if extend_source else request.POST["username"].strip(),
                 lock_control_enabled=lock_control_enabled,
                 control_username=control_username,
                 owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
@@ -1014,12 +1056,27 @@ def add_instance(request):
                 ssl_required=bool(request.POST.get("ssl_required")),
                 added_by=request.user,
             )
-            connection_group = uuid.uuid4()
+            if extend_source:
+                common.update(
+                    name=extend_source.name,
+                    engine=extend_source.engine,
+                    db_identifier=extend_source.db_identifier,
+                    region=extend_source.region,
+                    host=extend_source.host,
+                    port=extend_source.port,
+                    username=extend_source.username,
+                    owner_teams_webhook_url=extend_source.owner_teams_webhook_url,
+                    exclude_from_global_notifications=extend_source.exclude_from_global_notifications,
+                    ssl_required=extend_source.ssl_required,
+                    added_by=extend_source.added_by,
+                )
+            connection_group = extend_source.connection_group if extend_source else uuid.uuid4()
+            database_password = extend_source.get_password() if extend_source else request.POST["password"]
             created = []
             with transaction.atomic():
                 for database_name in database_names:
                     instance = RDSInstance(**common, db_name=database_name, connection_group=connection_group)
-                    instance.set_password(request.POST["password"])
+                    instance.set_password(database_password)
                     if control_password:
                         instance.set_control_password(control_password)
                     instance.save()
@@ -1032,14 +1089,19 @@ def add_instance(request):
                 key: request.POST.get(key, "")
                 for key in ("name", "engine", "db_identifier", "region", "host", "port", "database_names", "db_name", "username", "control_username", "owner_teams_webhook_url")
             }})
-        messages.success(request, f"Added {len(created)} database target(s) under {common['name']}.")
+        action_label = "Added" if not extend_source else "Added database target(s) to"
+        messages.success(request, f"{action_label} {common['name']}.")
         return redirect("instance-list")
 
     prefill = None
+    extend_instance = None
+    extend_pk = request.GET.get("extend")
     duplicate_pk = request.GET.get("duplicate")
-    if duplicate_pk:
-        source = get_object_or_404(RDSInstance, pk=duplicate_pk)
+    source_pk = extend_pk or duplicate_pk
+    if source_pk:
+        source = get_object_or_404(RDSInstance, pk=source_pk)
         _require_instance_access(request, source, write=True)
+        extend_instance = source.pk if extend_pk else None
         prefill = {
             "name": source.name,
             "db_identifier": source.db_identifier,
@@ -1047,8 +1109,8 @@ def add_instance(request):
             "region": source.region,
             "host": source.host,
             "port": source.port,
-            "database_names": source.db_name,
-            "db_name": source.db_name,
+            "database_names": "" if extend_pk else source.db_name,
+            "db_name": "" if extend_pk else source.db_name,
             "username": source.username,
             "lock_control_enabled": source.lock_control_enabled if request.user.is_superuser else False,
             "control_username": source.control_username if request.user.is_superuser and source.lock_control_enabled else "",
@@ -1057,7 +1119,7 @@ def add_instance(request):
             "password": source.get_password(),
             "ssl_required": source.ssl_required,
         }
-    return render(request, "monitor/add_instance.html", {"prefill": prefill})
+    return render(request, "monitor/add_instance.html", {"prefill": prefill, "extend_instance": extend_instance})
 
 
 @login_required

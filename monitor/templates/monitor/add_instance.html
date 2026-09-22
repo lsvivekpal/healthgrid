@@ -46,13 +46,14 @@
     <span class="heading-icon">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </span>
-    <div><h1>Add database connection</h1><p>Connect HealthGrid to one or more databases on the same endpoint.</p></div>
+    <div><h1>{% if extend_instance %}Add database to instance{% else %}Add database connection{% endif %}</h1><p>{% if extend_instance %}Register another database under the existing instance connection.{% else %}Connect HealthGrid to one or more databases on the same endpoint.{% endif %}</p></div>
   </div>
   {% if prefill %}
   <p style="font-size:12.5px;color:var(--text-muted);margin-top:6px;">Connection details copied from the source instance &mdash; just set a name, identifier and database.</p>
   {% endif %}
   <form method="post" id="add-instance-form" style="margin-top:6px;">
     {% csrf_token %}
+    {% if extend_instance %}<input type="hidden" name="extend_instance" value="{{ extend_instance }}">{% endif %}
 
     <div class="form-section-label">Display</div>
     <label for="id_name">Display name</label>
