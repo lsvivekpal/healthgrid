@@ -1,6 +1,27 @@
 {% extends "monitor/base.html" %}
 {% block title %}Users · HealthGrid{% endblock %}
 {% block content %}
+<style>
+  .user-access-summary .metric-card { padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-alt); min-width:0; }
+  .access-panel { min-width:0; padding:16px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); }
+  .access-panel-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .bulk-access-control { display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-alt); }
+  .bulk-access-control label { margin:0; font-size:12px; font-weight:600; }
+  .checkbox-inline { display:inline-flex; align-items:center; gap:5px; margin:0; font-size:12px; white-space:nowrap; }
+  .instance-access-list { display:grid; gap:7px; }
+  .instance-access-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); }
+  .instance-access-row:last-child { border-bottom:0; }
+  .instance-access-name { display:flex; align-items:center; gap:6px; min-width:0; overflow-wrap:anywhere; }
+  .instance-access-controls { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex:0 0 auto; }
+  .status-dot { width:7px; height:7px; flex:0 0 7px; border-radius:50%; background:var(--text-faint); }
+  .status-dot-ok { background:var(--success, #22c55e); }
+  @media (max-width: 720px) {
+    .user-access-summary { grid-template-columns:1fr !important; }
+    .user-access-panels { grid-template-columns:1fr !important; }
+    .instance-access-row { align-items:flex-start; flex-direction:column; }
+    .instance-access-controls { width:100%; justify-content:flex-start; flex-wrap:wrap; }
+  }
+</style>
 <div class="breadcrumb">
   <a href="{% url 'instance-list' %}">All instances</a><span style="color:var(--text-faint);">/</span><span style="color:var(--text);">Users</span>
 </div>
@@ -69,85 +90,96 @@
   {% endif %}
 </div>
 
-<div class="card table-scroll settings-card" style="max-width:1040px;padding:0;margin-top:16px;">
-  <table class="responsive-table">
-    <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th><th>Instance access</th><th>Replication permissions</th></tr></thead>
-    <tbody>
-      {% for account in users %}
-      <tr data-user-row="{{ account.pk }}" {% if selected_user_id != account.pk|stringformat:"s" %}style="display:none;"{% endif %}>
-        <td data-label="Username"><strong>{{ account.username }}</strong></td>
-        <td data-label="Email">{{ account.email|default:"—" }}</td>
-        <td data-label="Role">
-          {% if account.is_superuser %}
-            <span class="badge badge-ok">Administrator</span>
-          {% else %}
-            <form method="post" style="display:flex;align-items:center;gap:6px;min-width:145px;">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="update_user_role">
-              <input type="hidden" name="user_id" value="{{ account.pk }}">
-              <select name="role" style="width:105px;">
-                <option value="readonly" {% if not account.is_staff %}selected{% endif %}>Read-only</option>
-                <option value="operator" {% if account.is_staff %}selected{% endif %}>Operator</option>
-              </select>
-              {% if account.is_staff %}<label title="Allow access to global notification settings" style="display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;"><input type="checkbox" name="can_manage_global_notifications" value="1" {% if account.instance_access_scope.can_manage_global_notifications %}checked{% endif %}> Global settings</label>{% endif %}
-              <button class="btn btn-ghost btn-sm" type="submit" title="Save role">Save</button>
-            </form>
-          {% endif %}
-        </td>
-        <td data-label="Status">{% if account.is_active %}<span class="badge badge-ok">active</span>{% else %}<span class="badge badge-muted">disabled</span>{% endif %}</td>
-        <td data-label="MFA">{% if account.mfa_profile.enabled %}<span class="badge badge-ok">enabled</span>{% else %}<span class="badge badge-warn">pending</span>{% endif %}</td>
-        <td data-label="Instance access">
-          {% if account.is_superuser %}
-            <span class="badge badge-ok">All instances</span>
-          {% else %}
-            <form method="post" style="display:grid;gap:8px;min-width:260px;">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="update_instance_access">
-              <input type="hidden" name="user_id" value="{{ account.pk }}">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;background:var(--surface-alt);border-radius:var(--radius-sm);">
-                <label for="all-instance-role-{{ account.pk }}" style="margin:0;font-size:12px;">Grant all as</label>
-                <select id="all-instance-role-{{ account.pk }}" style="width:125px;" onchange="applyAllInstanceRoles('{{ account.pk }}', this.value)">
-                  <option value="">Choose access</option><option value="readonly">Read-only</option><option value="operator">Operator</option>
-                </select>
-                <input type="hidden" name="all_instance_role" id="all-instance-role-value-{{ account.pk }}">
-                {% if account.is_staff %}<label style="display:flex;align-items:center;gap:5px;margin:0;font-size:11px;"><input type="checkbox" onchange="applyAllNotificationAccess('{{ account.pk }}', this.checked)"> Owner webhook</label>{% endif %}
-              </div>
-              {% for access_row in account.instance_access_rows %}
-              <label for="access-{{ account.pk }}-{{ access_row.instance.pk }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;font-size:12px;">
-                <span style="min-width:0;overflow-wrap:anywhere;">{{ access_row.instance.name }} / {{ access_row.instance.db_name }} <span class="section-hint">({{ access_row.instance.db_identifier }})</span></span>
-                <select id="access-{{ account.pk }}-{{ access_row.instance.pk }}" name="instance_role_{{ access_row.instance.pk }}" data-access-group="{{ account.pk }}" style="width:115px;flex:0 0 115px;">
+{% if selected_account %}
+<div class="card settings-card" style="max-width:1040px;margin-top:16px;">
+  <div class="card-header" style="align-items:flex-start;">
+    <div>
+      <div class="card-title">Access for {{ selected_account.username }}</div>
+      <div class="section-hint" style="margin-top:5px;">Configure role, database access, Owner webhook permissions, and replication actions independently.</div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+      {% if selected_account.is_active %}<span class="badge badge-ok">Active</span>{% else %}<span class="badge badge-muted">Disabled</span>{% endif %}
+      {% if selected_account.mfa_profile.enabled %}<span class="badge badge-ok">MFA enabled</span>{% else %}<span class="badge badge-warn">MFA pending</span>{% endif %}
+    </div>
+  </div>
+  <div class="user-access-summary" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px;">
+    <div class="metric-card"><span class="section-hint">Email</span><strong style="display:block;margin-top:4px;overflow-wrap:anywhere;">{{ selected_account.email|default:"—" }}</strong></div>
+    <div class="metric-card"><span class="section-hint">Role</span><strong style="display:block;margin-top:4px;">{% if selected_account.is_superuser %}Administrator{% elif selected_account.is_staff %}Operator{% else %}Read-only{% endif %}</strong></div>
+    <div class="metric-card"><span class="section-hint">Replication</span><strong style="display:block;margin-top:4px;">{% if selected_account.is_superuser %}Full access{% elif selected_account.is_staff %}Operator grants{% else %}View only{% endif %}</strong></div>
+  </div>
+  {% if not selected_account.is_superuser %}
+  <form method="post" class="role-editor" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;padding:12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_user_role">
+    <input type="hidden" name="user_id" value="{{ selected_account.pk }}">
+    <label for="selected-user-role" style="margin:0;font-size:12px;font-weight:600;">Role</label>
+    <select id="selected-user-role" name="role" style="width:130px;">
+      <option value="readonly" {% if not selected_account.is_staff %}selected{% endif %}>Read-only</option>
+      <option value="operator" {% if selected_account.is_staff %}selected{% endif %}>Operator</option>
+    </select>
+    {% if selected_account.is_staff %}<label class="checkbox-inline"><input type="checkbox" name="can_manage_global_notifications" value="1" {% if selected_account.instance_access_scope.can_manage_global_notifications %}checked{% endif %}> Global notification settings</label>{% endif %}
+    <button class="btn btn-ghost btn-sm" type="submit">Save role</button>
+  </form>
+  {% endif %}
+
+  <div class="user-access-panels" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.7fr);gap:16px;margin-top:16px;">
+    <section class="access-panel">
+      <div class="access-panel-heading"><div><strong>Instance access</strong><div class="section-hint">Choose the access level for each database connection.</div></div></div>
+      {% if selected_account.is_superuser %}
+        <div class="section-hint" style="margin-top:14px;">Administrators automatically have access to every active instance.</div>
+      {% else %}
+        <form method="post" style="display:grid;gap:12px;margin-top:14px;">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="update_instance_access">
+          <input type="hidden" name="user_id" value="{{ selected_account.pk }}">
+          <div class="bulk-access-control">
+            <label for="all-instance-role-{{ selected_account.pk }}">Grant all as</label>
+            <select id="all-instance-role-{{ selected_account.pk }}" style="width:140px;" onchange="applyAllInstanceRoles('{{ selected_account.pk }}', this.value)">
+              <option value="">Choose access</option><option value="readonly">Read-only</option><option value="operator">Operator</option>
+            </select>
+            <input type="hidden" name="all_instance_role" id="all-instance-role-value-{{ selected_account.pk }}">
+            {% if selected_account.is_staff %}<label class="checkbox-inline"><input type="checkbox" onchange="applyAllNotificationAccess('{{ selected_account.pk }}', this.checked)"> Owner webhook</label>{% endif %}
+          </div>
+          <div class="instance-access-list">
+            {% for access_row in selected_account.instance_access_rows %}
+            <div class="instance-access-row">
+              <div class="instance-access-name"><span class="status-dot {% if access_row.role %}status-dot-ok{% endif %}"></span><span>{{ access_row.instance.name }} / {{ access_row.instance.db_name }}</span><span class="section-hint">({{ access_row.instance.db_identifier }})</span></div>
+              <div class="instance-access-controls">
+                <select id="access-{{ selected_account.pk }}-{{ access_row.instance.pk }}" name="instance_role_{{ access_row.instance.pk }}" data-access-group="{{ selected_account.pk }}" style="width:120px;">
                   <option value="" {% if not access_row.role %}selected{% endif %}>No access</option>
                   <option value="readonly" {% if access_row.role == "readonly" %}selected{% endif %}>Read-only</option>
-                  {% if account.is_staff %}<option value="operator" {% if access_row.role == "operator" %}selected{% endif %}>Operator</option>{% endif %}
+                  {% if selected_account.is_staff %}<option value="operator" {% if access_row.role == "operator" %}selected{% endif %}>Operator</option>{% endif %}
                 </select>
-                {% if account.is_staff %}<label title="Allow this operator to manage the owner Teams webhook" style="display:flex;align-items:center;gap:4px;margin:0;font-size:11px;white-space:nowrap;"><input type="checkbox" name="instance_notifications_{{ access_row.instance.pk }}" data-notification-role="access-{{ account.pk }}-{{ access_row.instance.pk }}" {% if access_row.can_manage_notifications %}checked{% endif %}> Owner webhook</label>{% endif %}
-              </label>
-              {% empty %}<span class="section-hint">No active instances.</span>{% endfor %}
-              <button class="btn btn-ghost btn-sm" type="submit">Save instance access</button>
-            </form>
-          {% endif %}
-        </td>
-        <td data-label="Replication permissions">
-          {% if account.is_superuser %}
-            <span class="badge badge-ok">Full access</span>
-          {% elif account.is_staff %}
-            <form method="post" style="display:grid;gap:8px;">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="update_slot_access">
-              <input type="hidden" name="user_id" value="{{ account.pk }}">
-              <label for="terminate-slot-{{ account.pk }}" style="display:flex;align-items:center;gap:8px;margin:0;font-size:12px;"><input id="terminate-slot-{{ account.pk }}" type="checkbox" name="can_terminate_slots" value="1" {% if account.replication_slot_access.can_terminate %}checked{% endif %}>Terminate slot backend</label>
-              <label for="drop-slot-{{ account.pk }}" style="display:flex;align-items:center;gap:8px;margin:0;font-size:12px;"><input id="drop-slot-{{ account.pk }}" type="checkbox" name="can_drop_slots" value="1" {% if account.replication_slot_access.can_drop %}checked{% endif %}>Drop slot (MFA)</label>
-              <button class="btn btn-ghost btn-sm" type="submit" aria-label="Save replication permissions for {{ account.username }}">Save permissions</button>
-            </form>
-          {% else %}
-            <span class="section-hint">View only</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% empty %}<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-faint);">No users found.</td></tr>{% endfor %}
-    </tbody>
-  </table>
+                {% if selected_account.is_staff %}<label class="checkbox-inline" title="Allow this operator to manage the owner Teams webhook"><input type="checkbox" name="instance_notifications_{{ access_row.instance.pk }}" data-notification-role="access-{{ selected_account.pk }}-{{ access_row.instance.pk }}" {% if access_row.can_manage_notifications %}checked{% endif %}> Owner webhook</label>{% endif %}
+              </div>
+            </div>
+            {% empty %}<div class="section-hint">No active instances.</div>{% endfor %}
+          </div>
+          <button class="btn btn-primary btn-sm" type="submit" style="justify-self:start;">Save instance access</button>
+        </form>
+      {% endif %}
+    </section>
+
+    <section class="access-panel">
+      <div class="access-panel-heading"><div><strong>Replication permissions</strong><div class="section-hint">Separate from database access.</div></div></div>
+      {% if selected_account.is_superuser %}
+        <div class="section-hint" style="margin-top:14px;">Administrator has full replication-slot access. Drop actions require MFA.</div>
+      {% elif selected_account.is_staff %}
+        <form method="post" style="display:grid;gap:10px;margin-top:14px;">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="update_slot_access">
+          <input type="hidden" name="user_id" value="{{ selected_account.pk }}">
+          <label class="checkbox-inline"><input type="checkbox" name="can_terminate_slots" value="1" {% if selected_account.replication_slot_access.can_terminate %}checked{% endif %}> Terminate slot backend</label>
+          <label class="checkbox-inline"><input type="checkbox" name="can_drop_slots" value="1" {% if selected_account.replication_slot_access.can_drop %}checked{% endif %}> Drop slot <span class="section-hint">(MFA)</span></label>
+          <button class="btn btn-ghost btn-sm" type="submit" style="justify-self:start;">Save permissions</button>
+        </form>
+      {% else %}
+        <div class="section-hint" style="margin-top:14px;">Read-only users cannot manage replication slots.</div>
+      {% endif %}
+    </section>
+  </div>
 </div>
+{% endif %}
 <script>
   function selectManagedUser(userId) {
     if (userId) window.location.href = '{% url "user-management" %}?user_id=' + encodeURIComponent(userId);
