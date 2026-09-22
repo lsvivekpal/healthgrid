@@ -277,6 +277,14 @@ Notification cards, weekly report timestamps, and schedules use IST (`Asia/Kolka
 
 Operators and Administrators can use **Add instance** to configure a friendly name, database identifier, region, endpoint, port, database name(s), credentials, SSL preference, and optional owner Teams webhook. Enter multiple database names separated by commas or new lines to create independent monitored targets that share the same endpoint and connection group; locks, sessions, alerts, history, and access remain isolated per database. Dedicated lock-control credentials are disabled by default; only an Administrator can enable and configure them for an instance.
 
+The dashboard presents one compact card per connection group, with aggregate session and lock counts and a database list inside the card. Select a database to open its existing detailed monitoring page for sessions, locks, queries, and actions. Database rows with active locks are highlighted, and large database lists are collapsed behind a `+N more` control. Manage/edit and Administrator-only remove actions are available on the instance card; removing an instance group removes its registered database targets from HealthGrid but does not delete the actual databases.
+
+Migration `0039_group_legacy_instances` groups older records that share the same instance identity so databases registered before multi-database support appear together. Always run migrations during deployment:
+
+```bash
+python manage.py migrate --noinput
+```
+
 Use **Test connection** before saving. Existing instance pages support rename, duplicate, and owner-webhook update/test. Administrators can enable, update, and test dedicated lock-control credentials. When disabled, monitoring and control actions use the regular DB credentials.
 
 Administrators can assign each non-administrator account access to individual instances from **User management**, or use **Grant all instances as** to apply Read-only or Operator access in one action. Operators can additionally receive the per-instance **Owner webhook** permission. This permission controls whether they can change the owner Teams webhook; shared/global-channel exclusion remains Administrator-only. Read-only accounts cannot change notification settings. Older staff accounts without an explicit instance-access scope retain their previous access until an Administrator assigns a scope.
