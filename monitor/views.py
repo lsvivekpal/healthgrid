@@ -509,6 +509,7 @@ def user_management(request):
         "access_instances": active_instances,
         "instance_access_map": access_map,
         "selected_user_id": selected_user_id,
+        "selected_account": next((account for account in users if str(account.pk) == str(selected_user_id)), None),
     })
 
 
