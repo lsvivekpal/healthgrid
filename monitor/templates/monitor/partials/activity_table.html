@@ -30,9 +30,9 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       </span>
       <div class="vital-body">
-        <div class="vital-top"><span class="vital-label">Active / Idle</span></div>
-        <div class="vital-value">{{ vitals.active_conns }}<span class="vital-sub"> active</span></div>
-        <div class="vital-foot">{{ vitals.idle_conns }} idle{% if vitals.idle_in_txn %} · <span style="color:var(--warn-fg);font-weight:600;">{{ vitals.idle_in_txn }} idle-in-txn</span>{% endif %}</div>
+        <div class="vital-top"><span class="vital-label">Sessions</span></div>
+        <div class="vital-value">{{ vitals.active_conns }}<span class="vital-sub"> active sessions</span></div>
+        <div class="vital-foot">{{ vitals.idle_conns }} idle sessions{% if vitals.idle_in_txn %} · <span style="color:var(--warn-fg);font-weight:600;">{{ vitals.idle_in_txn }} idle-in-txn</span>{% endif %}</div>
       </div>
     </div>
     <div class="vital" style="--accent:{% if vitals.longest_active_seconds >= 60 %}var(--danger-dot){% elif vitals.longest_active_seconds >= 30 %}var(--warn-dot){% else %}var(--accent){% endif %};">
@@ -125,9 +125,9 @@
             {% endif %}
             <td data-label="Blocked pid">{{ row.blocked_pid }} <span style="color:var(--text-faint);">({{ row.blocked_user }})</span></td>
             <td data-label="Waiting" title="{{ row.waiting_seconds }} seconds">{% if row.waiting_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.waiting_seconds_human }}</strong>{% else %}{{ row.waiting_seconds_human }}{% endif %}</td>
-            <td data-label="Blocked query"><code class="query-preview" title="{{ row.blocked_query }}">{{ row.blocked_query|truncatechars:80 }}</code></td>
+            <td data-label="Blocked query"><div class="query-with-copy"><code class="query-preview" title="{{ row.blocked_query }}">{{ row.blocked_query|truncatechars:80 }}</code><button type="button" class="copy-query-btn" data-query="{{ row.blocked_query }}" onclick="copyQuery(this)" title="Copy blocked query" aria-label="Copy blocked query">⧉</button></div></td>
             <td data-label="Blocking pid">{{ row.blocking_pid }} <span style="color:var(--text-faint);">({{ row.blocking_user }})</span></td>
-            <td data-label="Blocking query"><code class="query-preview" title="{{ row.blocking_query }}">{{ row.blocking_query|truncatechars:80 }}</code></td>
+            <td data-label="Blocking query"><div class="query-with-copy"><code class="query-preview" title="{{ row.blocking_query }}">{{ row.blocking_query|truncatechars:80 }}</code><button type="button" class="copy-query-btn" data-query="{{ row.blocking_query }}" onclick="copyQuery(this)" title="Copy blocking query" aria-label="Copy blocking query">⧉</button></div></td>
             <td>
               {% if is_staff %}
               <div id="lock-actions-{{ forloop.counter0 }}" style="display:none;flex-direction:column;gap:4px;align-items:flex-start;">
@@ -171,7 +171,7 @@
     <div class="card-header">
       <div class="card-title">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        Sessions
+        Total sessions
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         {% if activity %}
@@ -250,7 +250,7 @@
           </td>
           <td data-label="Wait event">{{ row.wait_event|default:"—" }}</td>
           <td data-label="Duration" data-sort-value="{{ row.duration_seconds }}" title="{{ row.duration_seconds }} seconds">{% if row.duration_seconds >= 30 %}<strong style="color:var(--danger-fg);">{{ row.duration_seconds_human }}</strong>{% else %}{{ row.duration_seconds_human }}{% endif %}</td>
-          <td data-label="Query"><code class="query-preview" title="{{ row.query }}">{{ row.query|truncatechars:72 }}</code></td>
+          <td data-label="Query"><div class="query-with-copy"><code class="query-preview" title="{{ row.query }}">{{ row.query|truncatechars:72 }}</code><button type="button" class="copy-query-btn" data-query="{{ row.query }}" onclick="copyQuery(this)" title="Copy session query" aria-label="Copy session query">⧉</button></div></td>
           {% if is_staff %}
           <td>
             {% if row.pid not in blocking_pids %}
@@ -276,6 +276,15 @@
     </table>
     </div>
   </div>
+
+  <style>
+    .query-with-copy { display:flex; align-items:flex-start; gap:6px; min-width:0; }
+    .query-with-copy .query-preview { flex:1; min-width:0; }
+    .copy-query-btn { flex:0 0 auto; border:1px solid var(--brand); background:var(--brand-soft); color:var(--brand); border-radius:6px; padding:3px 7px; line-height:1.1; cursor:pointer; font-size:12px; font-weight:700; box-shadow:0 1px 2px rgba(37,99,235,.12); transition:background 120ms ease,color 120ms ease,transform 120ms ease; }
+    .copy-query-btn:hover { color:#fff; border-color:var(--brand); background:var(--brand); transform:translateY(-1px); }
+    .copy-query-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .copy-query-btn.copied { color:#fff; border-color:var(--ok-fg); background:var(--ok-fg); box-shadow:0 1px 3px rgba(22,163,74,.22); }
+  </style>
 
   {% if top_tables %}
   <div class="card" id="top-tables" style="margin-top:16px;">

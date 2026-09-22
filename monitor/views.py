@@ -1,5 +1,6 @@
 import csv
 import logging
+import uuid
 from datetime import datetime
 
 from django.conf import settings
@@ -557,7 +558,14 @@ def instance_card_partial(request, pk):
     ctx = {"instance": instance, "can_operate_instance": can_operate_instance(request.user, instance)}
     try:
         activity, blocking = db.fetch_activity(instance)
-        ctx.update(reachable=True, session_count=len(activity), blocked_count=len(blocking))
+        active_sessions = sum(1 for row in activity if str(row.get("state") or "").casefold() == "active")
+        ctx.update(
+            reachable=True,
+            session_count=len(activity),
+            active_session_count=active_sessions,
+            idle_session_count=max(0, len(activity) - active_sessions),
+            blocked_count=len(blocking),
+        )
     except db.ConnectionError as exc:
         ctx.update(reachable=False, error=str(exc))
     return render(request, "monitor/partials/instance_card.html", ctx)
@@ -911,36 +919,60 @@ def add_instance(request):
         lock_control_enabled = request.user.is_superuser and bool(request.POST.get("lock_control_enabled"))
         control_username = request.POST.get("control_username", "").strip() if lock_control_enabled else ""
         control_password = request.POST.get("control_password", "") if lock_control_enabled else ""
+        database_names = [
+            value.strip()
+            for value in request.POST.get("database_names", request.POST.get("db_name", "")).replace("\n", ",").split(",")
+            if value.strip()
+        ]
+        if not database_names or len(database_names) > 50:
+            messages.error(request, "Enter between 1 and 50 database names, separated by commas or new lines.")
+            return render(request, "monitor/add_instance.html", {"prefill": {
+                key: request.POST.get(key, "")
+                for key in ("name", "engine", "db_identifier", "region", "host", "port", "database_names", "db_name", "username", "owner_teams_webhook_url")
+            }})
         if lock_control_enabled and control_username and not control_password:
             messages.error(request, "Lock-control password is required when a lock-control username is provided.")
             return render(request, "monitor/add_instance.html", {"prefill": {
                 key: request.POST.get(key, "")
-                for key in ("name", "engine", "db_identifier", "region", "host", "port", "db_name", "username", "control_username", "owner_teams_webhook_url")
+                for key in ("name", "engine", "db_identifier", "region", "host", "port", "database_names", "db_name", "username", "control_username", "owner_teams_webhook_url")
             }})
-        instance = RDSInstance(
-            name=request.POST["name"],
-            engine=request.POST.get("engine", "postgresql"),
-            db_identifier=request.POST["db_identifier"],
-            region=request.POST.get("region", "us-east-1"),
-            host=request.POST["host"],
-            port=request.POST.get("port") or 5432,
-            db_name=request.POST["db_name"],
-            username=request.POST["username"],
-            lock_control_enabled=lock_control_enabled,
-            control_username=control_username,
-            owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
-            exclude_from_global_notifications=(
-                request.user.is_superuser and bool(request.POST.get("exclude_from_global_notifications"))
-            ),
-            ssl_required=bool(request.POST.get("ssl_required")),
-            added_by=request.user,
-        )
-        instance.set_password(request.POST["password"])
-        if control_password:
-            instance.set_control_password(control_password)
-        instance.save()
-        _log_audit(instance, "add_instance", request.user, detail=instance.db_identifier)
-        messages.success(request, f"Added {instance.name}.")
+        try:
+            common = dict(
+                name=request.POST["name"].strip(),
+                engine=request.POST.get("engine", "postgresql"),
+                db_identifier=request.POST["db_identifier"].strip(),
+                region=request.POST.get("region", "us-east-1").strip(),
+                host=request.POST["host"].strip(),
+                port=request.POST.get("port") or (3306 if request.POST.get("engine") in {"mysql", "mariadb"} else 5432),
+                username=request.POST["username"].strip(),
+                lock_control_enabled=lock_control_enabled,
+                control_username=control_username,
+                owner_teams_webhook_url=request.POST.get("owner_teams_webhook_url", "").strip(),
+                exclude_from_global_notifications=(
+                    request.user.is_superuser and bool(request.POST.get("exclude_from_global_notifications"))
+                ),
+                ssl_required=bool(request.POST.get("ssl_required")),
+                added_by=request.user,
+            )
+            connection_group = uuid.uuid4()
+            created = []
+            with transaction.atomic():
+                for database_name in database_names:
+                    instance = RDSInstance(**common, db_name=database_name, connection_group=connection_group)
+                    instance.set_password(request.POST["password"])
+                    if control_password:
+                        instance.set_control_password(control_password)
+                    instance.save()
+                    _log_audit(instance, "add_instance", request.user, detail=instance.db_identifier)
+                    created.append(instance)
+        except (KeyError, ValueError, DatabaseError) as exc:
+            logger.exception("Could not add database target(s)")
+            messages.error(request, f"Could not add the database target(s): {exc}")
+            return render(request, "monitor/add_instance.html", {"prefill": {
+                key: request.POST.get(key, "")
+                for key in ("name", "engine", "db_identifier", "region", "host", "port", "database_names", "db_name", "username", "control_username", "owner_teams_webhook_url")
+            }})
+        messages.success(request, f"Added {len(created)} database target(s) under {common['name']}.")
         return redirect("instance-list")
 
     prefill = None
@@ -949,10 +981,14 @@ def add_instance(request):
         source = get_object_or_404(RDSInstance, pk=duplicate_pk)
         _require_instance_access(request, source, write=True)
         prefill = {
+            "name": source.name,
+            "db_identifier": source.db_identifier,
             "engine": source.engine,
             "region": source.region,
             "host": source.host,
             "port": source.port,
+            "database_names": source.db_name,
+            "db_name": source.db_name,
             "username": source.username,
             "lock_control_enabled": source.lock_control_enabled if request.user.is_superuser else False,
             "control_username": source.control_username if request.user.is_superuser and source.lock_control_enabled else "",
@@ -974,7 +1010,7 @@ def test_connection(request):
         engine=request.POST.get("engine", "postgresql"),
         host=request.POST.get("host", ""),
         port=request.POST.get("port") or 5432,
-        db_name=request.POST.get("db_name", ""),
+        db_name=request.POST.get("database_names", request.POST.get("db_name", "")).replace("\n", ",").split(",")[0].strip(),
         username=request.POST.get("username", ""),
         password=request.POST.get("password", ""),
         ssl_required=bool(request.POST.get("ssl_required")),

@@ -1,4 +1,5 @@
 from datetime import time
+import uuid
 
 from django.conf import settings
 from django.db import models
@@ -14,6 +15,7 @@ class RDSInstance(models.Model):
         ("mariadb", "MariaDB"),
     )
     name = models.CharField(max_length=100, help_text="Friendly display name")
+    connection_group = models.UUIDField(default=uuid.uuid4, editable=False, db_index=True)
     engine = models.CharField(max_length=16, choices=ENGINE_CHOICES, default="postgresql")
     db_identifier = models.CharField(max_length=255, help_text="RDS DBInstanceIdentifier")
     region = models.CharField(max_length=32, default="us-east-1")

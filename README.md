@@ -275,7 +275,7 @@ Notification cards, weekly report timestamps, and schedules use IST (`Asia/Kolka
 
 ## Registering databases
 
-Operators and Administrators can use **Add instance** to configure a friendly name, database identifier, region, endpoint, port, database name, credentials, SSL preference, and optional owner Teams webhook. Dedicated lock-control credentials are disabled by default; only an Administrator can enable and configure them for an instance.
+Operators and Administrators can use **Add instance** to configure a friendly name, database identifier, region, endpoint, port, database name(s), credentials, SSL preference, and optional owner Teams webhook. Enter multiple database names separated by commas or new lines to create independent monitored targets that share the same endpoint and connection group; locks, sessions, alerts, history, and access remain isolated per database. Dedicated lock-control credentials are disabled by default; only an Administrator can enable and configure them for an instance.
 
 Use **Test connection** before saving. Existing instance pages support rename, duplicate, and owner-webhook update/test. Administrators can enable, update, and test dedicated lock-control credentials. When disabled, monitoring and control actions use the regular DB credentials.
 

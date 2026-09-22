@@ -167,6 +167,13 @@ class KillSessionPermissionTests(TestCase):
 
 
 class AddInstanceAuditTests(TestCase):
+    def test_add_instance_page_loads_without_prefill(self):
+        staff = User.objects.create_user("add-page-staffer", password="pw", is_staff=True)
+        self.client.login(username="add-page-staffer", password="pw")
+        response = self.client.get(reverse("instance-add"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Database name(s)")
+
     def test_add_instance_writes_audit_log(self):
         staff = User.objects.create_user("staffer2", password="pw", is_staff=True)
         self.client.login(username="staffer2", password="pw")
@@ -184,6 +191,24 @@ class AddInstanceAuditTests(TestCase):
         instance = RDSInstance.objects.get(db_identifier="new-db")
         log = AuditLog.objects.get(action="add_instance", instance=instance)
         self.assertEqual(log.performed_by, staff)
+
+    def test_add_instance_accepts_multiple_database_names(self):
+        staff = User.objects.create_user("multi-db-staffer", password="pw", is_staff=True)
+        self.client.login(username="multi-db-staffer", password="pw")
+        resp = self.client.post(reverse("instance-add"), {
+            "name": "Shared endpoint",
+            "db_identifier": "shared-endpoint",
+            "region": "us-east-1",
+            "host": "localhost",
+            "port": 5432,
+            "database_names": "proddb, cnp\npayments",
+            "username": "appuser",
+            "password": "apppass",
+        })
+        self.assertEqual(resp.status_code, 302)
+        instances = list(RDSInstance.objects.filter(db_identifier="shared-endpoint").order_by("db_name"))
+        self.assertEqual([instance.db_name for instance in instances], ["cnp", "payments", "proddb"])
+        self.assertEqual(len({instance.connection_group for instance in instances}), 1)
 
 
 class MFASecurityTests(TestCase):
