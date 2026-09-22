@@ -210,6 +210,18 @@ class AddInstanceAuditTests(TestCase):
         self.assertEqual([instance.db_name for instance in instances], ["cnp", "payments", "proddb"])
         self.assertEqual(len({instance.connection_group for instance in instances}), 1)
 
+    def test_add_database_to_existing_instance_reuses_connection_group(self):
+        staff = User.objects.create_user("extend-db-staffer", password="pw", is_staff=True)
+        source = make_instance(name="QA", db_identifier="qa", db_name="lms")
+        self.client.login(username="extend-db-staffer", password="pw")
+        response = self.client.post(reverse("instance-add"), {
+            "extend_instance": source.pk,
+            "database_names": "los",
+        })
+        self.assertEqual(response.status_code, 302)
+        targets = RDSInstance.objects.filter(connection_group=source.connection_group)
+        self.assertEqual(set(targets.values_list("db_name", flat=True)), {"lms", "los"})
+
 
 class InstanceGroupingTests(TestCase):
     def test_dashboard_groups_databases_by_connection_group(self):
