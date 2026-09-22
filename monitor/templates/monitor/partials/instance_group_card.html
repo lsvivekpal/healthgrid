@@ -71,12 +71,12 @@
   </div>
   <div class="section-hint" style="margin-top:10px;text-align:right;">Select a database to view sessions, locks, and queries →</div>
   {% if server_overview %}
-  <div class="server-overview-panel" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
-    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+  <details class="server-overview-panel" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);">
+    <summary style="display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer;list-style:none;">
       <strong style="font-size:12px;">Server-wide totals</strong>
-      <span class="section-hint">read-only discovery</span>
-    </div>
-    <div class="section-hint" style="margin-top:4px;">{{ server_overview.total }} sessions · {{ server_overview.locks }} locks across {{ server_overview.databases|length }} databases</div>
+      <span class="section-hint">{{ server_overview.total }} sessions · {{ server_overview.locks }} locks · expand</span>
+    </summary>
+    <div class="section-hint" style="margin-top:8px;">Read-only discovery across {{ server_overview.databases|length }} databases.</div>
     {% if discovered_databases %}
     <div class="section-hint" style="font-weight:700;margin-top:10px;margin-bottom:6px;">Discovered databases not registered</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;">
@@ -88,7 +88,7 @@
     {% else %}
     <div class="section-hint" style="margin-top:8px;">All discovered databases are registered for detailed monitoring.</div>
     {% endif %}
-  </div>
+  </details>
   {% elif discovery_error %}
   <div class="section-hint" style="margin-top:12px;">Server-wide discovery unavailable: {{ discovery_error }}</div>
   {% endif %}
