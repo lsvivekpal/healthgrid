@@ -624,6 +624,30 @@
       });
     }
 
+    function copyQuery(button) {
+      var query = button.getAttribute('data-query') || '';
+      if (!query) return;
+      var copied = function () {
+        button.classList.add('copied');
+        var original = button.textContent;
+        button.textContent = '✓';
+        setTimeout(function () { button.classList.remove('copied'); button.textContent = original; }, 1200);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(query).then(copied).catch(function () { fallbackCopyQuery(query, copied); });
+      } else {
+        fallbackCopyQuery(query, copied);
+      }
+    }
+
+    function fallbackCopyQuery(query, done) {
+      var area = document.createElement('textarea');
+      area.value = query;
+      area.style.position = 'fixed'; area.style.opacity = '0';
+      document.body.appendChild(area); area.focus(); area.select();
+      try { if (document.execCommand('copy')) done(); } finally { document.body.removeChild(area); }
+    }
+
     function sortMobileSessions(reverse) {
       var select = document.getElementById('session-sort-column');
       var table = document.getElementById('sessions-table');

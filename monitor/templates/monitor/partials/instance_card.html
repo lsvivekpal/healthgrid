@@ -23,11 +23,14 @@
   </div>
   <div class="kv-grid" style="margin-top:6px;">
     <span>id: <b>{{ instance.db_identifier }}</b></span>
+    <span>database: <b>{{ instance.db_name }}</b></span>
     <span>region: <b>{{ instance.region }}</b></span>
   </div>
   {% if reachable %}
-  <div style="display:flex;gap:8px;margin-top:12px;">
-    <span class="badge badge-muted" style="flex:1;justify-content:center;">{{ session_count }} session{{ session_count|pluralize }}</span>
+  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+    <span class="badge badge-muted" style="flex:1;justify-content:center;min-width:105px;">Sessions</span>
+    <span class="badge badge-muted" style="flex:1;justify-content:center;min-width:105px;">{{ active_session_count }} active</span>
+    <span class="badge badge-muted" style="flex:1;justify-content:center;min-width:105px;">{{ idle_session_count }} idle</span>
     {% if blocked_count > 0 %}
     <span class="badge badge-danger" style="flex:1;justify-content:center;">{{ blocked_count }} lock{{ blocked_count|pluralize }}</span>
     {% else %}
