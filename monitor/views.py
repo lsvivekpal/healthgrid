@@ -362,7 +362,7 @@ def user_management(request):
     """Administrator-only account creation and per-operator slot grants."""
     _require_administrator(request)
     User = get_user_model()
-    active_instances = list(RDSInstance.objects.filter(is_active=True))
+    active_instances = list(RDSInstance.objects.filter(is_active=True).order_by("connection_group", "name", "db_name"))
     if request.method == "POST":
         can_drop = request.POST.get("can_drop_slots") == "1"
         can_terminate = request.POST.get("can_terminate_slots") == "1"
@@ -490,6 +490,7 @@ def user_management(request):
                     messages.success(request, f"Created {role} user '{username}'. They will enroll their own authenticator on first login.")
                     return redirect("user-management")
     users = list(User.objects.select_related("replication_slot_access", "mfa_profile", "instance_access_scope").order_by("username"))
+    selected_user_id = request.GET.get("user_id") or (str(users[0].pk) if users else "")
     grants = UserInstanceAccess.objects.select_related("instance").filter(user__in=users)
     access_map = {(grant.user_id, grant.instance_id): grant.role for grant in grants}
     for account in users:
@@ -507,6 +508,7 @@ def user_management(request):
         "users": users,
         "access_instances": active_instances,
         "instance_access_map": access_map,
+        "selected_user_id": selected_user_id,
     })
 
 

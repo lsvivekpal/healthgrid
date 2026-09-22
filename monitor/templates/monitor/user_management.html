@@ -44,7 +44,7 @@
       </div>
       {% for monitored_instance in access_instances %}
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;">
-        <label for="new-instance-role-{{ monitored_instance.pk }}" style="margin:0;min-width:0;overflow-wrap:anywhere;">{{ monitored_instance.name }} <span class="section-hint">({{ monitored_instance.db_identifier }})</span></label>
+        <label for="new-instance-role-{{ monitored_instance.pk }}" style="margin:0;min-width:0;overflow-wrap:anywhere;">{{ monitored_instance.name }} / {{ monitored_instance.db_name }} <span class="section-hint">({{ monitored_instance.db_identifier }})</span></label>
         <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto;">
           <select id="new-instance-role-{{ monitored_instance.pk }}" name="new_instance_role_{{ monitored_instance.pk }}" style="width:140px;">
             <option value="">No access</option><option value="readonly">Read-only</option><option value="operator">Operator</option>
@@ -58,12 +58,23 @@
   </form>
 </div>
 
+<div class="card settings-card" style="max-width:780px;margin-top:16px;">
+  <div class="card-title">Manage user access</div>
+  <div class="section-hint" style="margin-top:5px;line-height:1.45;">Select one user to manage their role, instance/database access, and Owner webhook permissions.</div>
+  {% if users %}
+  <label for="user-access-picker" style="margin-top:14px;">User</label>
+  <select id="user-access-picker" onchange="selectManagedUser(this.value)" style="max-width:360px;">
+    {% for account in users %}<option value="{{ account.pk }}" {% if selected_user_id == account.pk|stringformat:"s" %}selected{% endif %}>{{ account.username }}{% if account.is_superuser %} · Administrator{% elif account.is_staff %} · Operator{% else %} · Read-only{% endif %}</option>{% endfor %}
+  </select>
+  {% endif %}
+</div>
+
 <div class="card table-scroll settings-card" style="max-width:1040px;padding:0;margin-top:16px;">
   <table class="responsive-table">
     <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>MFA</th><th>Instance access</th><th>Replication permissions</th></tr></thead>
     <tbody>
       {% for account in users %}
-      <tr>
+      <tr data-user-row="{{ account.pk }}" {% if selected_user_id != account.pk|stringformat:"s" %}style="display:none;"{% endif %}>
         <td data-label="Username"><strong>{{ account.username }}</strong></td>
         <td data-label="Email">{{ account.email|default:"—" }}</td>
         <td data-label="Role">
@@ -103,7 +114,7 @@
               </div>
               {% for access_row in account.instance_access_rows %}
               <label for="access-{{ account.pk }}-{{ access_row.instance.pk }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;font-size:12px;">
-                <span style="min-width:0;overflow-wrap:anywhere;">{{ access_row.instance.name }}</span>
+                <span style="min-width:0;overflow-wrap:anywhere;">{{ access_row.instance.name }} / {{ access_row.instance.db_name }} <span class="section-hint">({{ access_row.instance.db_identifier }})</span></span>
                 <select id="access-{{ account.pk }}-{{ access_row.instance.pk }}" name="instance_role_{{ access_row.instance.pk }}" data-access-group="{{ account.pk }}" style="width:115px;flex:0 0 115px;">
                   <option value="" {% if not access_row.role %}selected{% endif %}>No access</option>
                   <option value="readonly" {% if access_row.role == "readonly" %}selected{% endif %}>Read-only</option>
@@ -138,6 +149,9 @@
   </table>
 </div>
 <script>
+  function selectManagedUser(userId) {
+    if (userId) window.location.href = '{% url "user-management" %}?user_id=' + encodeURIComponent(userId);
+  }
   function applyAllInstanceRoles(group, value) {
     var selector = group === 'new' ? '[id^="new-instance-role-"]' : 'select[data-access-group="' + group + '"]';
     document.querySelectorAll(selector).forEach(function (select) { select.value = value; });
