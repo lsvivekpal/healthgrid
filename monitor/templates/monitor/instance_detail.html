@@ -1,4 +1,5 @@
 {% extends "monitor/base.html" %}
+{% load security_tags %}
 {% block title %}{{ instance.name }} &middot; HealthGrid{% endblock %}
 {% block content %}
 <div class="breadcrumb">
@@ -33,10 +34,10 @@
         <span>id: <b>{{ instance.db_identifier }}</b></span>
         <span>region: <b>{{ instance.region }}</b></span>
         <span style="display:inline-flex;align-items:center;gap:5px;">
-          endpoint: <b>{{ instance.host }}:{{ instance.port }}/{{ instance.db_name }}</b>
-          <button type="button" class="icon-btn" id="copy-endpoint-btn" title="Copy endpoint" onclick="copyEndpoint(this)">
+          endpoint: <b>{% if user.is_superuser %}{{ instance.host }}{% else %}{{ instance.host|masked_endpoint }}{% endif %}:{{ instance.port }}/{{ instance.db_name }}</b>
+          {% if user.is_superuser %}<button type="button" class="icon-btn" id="copy-endpoint-btn" title="Copy endpoint" onclick="copyEndpoint(this)">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
+          </button>{% endif %}
         </span>
         {% if instance.added_by %}<span>added by: <b>{{ instance.added_by }}</b></span>{% endif %}
         <span>since: <b>{{ instance.created_at|date:"Y-m-d" }}</b></span>
@@ -186,7 +187,7 @@
 
 <script>
   function copyEndpoint(btn) {
-    var text = '{{ instance.host }}:{{ instance.port }}/{{ instance.db_name }}';
+    var text = '{% if user.is_superuser %}{{ instance.host }}:{{ instance.port }}/{{ instance.db_name }}{% endif %}';
     navigator.clipboard.writeText(text).then(function () {
       var original = btn.innerHTML;
       btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
