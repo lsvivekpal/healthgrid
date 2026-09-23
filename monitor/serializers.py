@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import AuditLog, RDSInstance
+from .security import mask_endpoint
 
 
 class RDSInstanceSerializer(serializers.ModelSerializer):
@@ -17,6 +18,13 @@ class RDSInstanceSerializer(serializers.ModelSerializer):
             "username", "password", "lock_control_enabled", "control_username", "control_password", "owner_teams_webhook_url", "exclude_from_global_notifications", "ssl_required", "is_active", "added_by", "created_at",
         ]
         read_only_fields = ["added_by", "created_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if not request or not request.user.is_superuser:
+            data["host"] = mask_endpoint(instance.host)
+        return data
 
     def create(self, validated_data):
         request = self.context.get("request")
