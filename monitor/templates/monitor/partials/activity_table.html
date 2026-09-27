@@ -55,7 +55,7 @@
       </div>
     </div>
   </div>
-  <style>
+  <style nonce="{{ request.csp_nonce }}">
     .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 10px; margin-bottom: 16px; }
     .vital { position: relative; display: flex; align-items: flex-start; gap: 11px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 11px 13px; box-shadow: var(--shadow-sm); overflow: hidden; }
     .vital::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: .9; }
@@ -277,7 +277,7 @@
     </div>
   </div>
 
-  <style>
+  <style nonce="{{ request.csp_nonce }}">
     .query-with-copy { display:flex; align-items:flex-start; gap:6px; min-width:0; }
     .query-with-copy .query-preview { flex:1; min-width:0; }
     .copy-query-btn { flex:0 0 auto; border:1px solid var(--brand); background:var(--brand-soft); color:var(--brand); border-radius:6px; padding:3px 7px; line-height:1.1; cursor:pointer; font-size:12px; font-weight:700; box-shadow:0 1px 2px rgba(37,99,235,.12); transition:background 120ms ease,color 120ms ease,transform 120ms ease; }

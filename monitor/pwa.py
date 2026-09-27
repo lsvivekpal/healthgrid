@@ -37,7 +37,6 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // Never cache dashboard HTML, HTMX responses, APIs, or POST requests.
   if (request.method !== "GET" || url.origin !== self.location.origin || !url.pathname.startsWith("/static/")) {
     return;
   }
