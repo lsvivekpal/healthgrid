@@ -39,6 +39,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "monitor.middleware.BrowserSecurityHeadersMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -90,6 +91,7 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+WHITENOISE_ALLOW_ALL_ORIGINS = False
 # Serve the files collected into the image even with DEBUG=False. Hashed URLs
 # ensure browsers fetch the matching stylesheet after each UI deployment.
 STORAGES = {
@@ -171,6 +173,10 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_REFERRER_POLICY = "same-origin"
     X_FRAME_OPTIONS = "DENY"
+
+# The app renders the CSRF token into its HTMX request header in the page, so
+# browser JavaScript does not need to read the CSRF cookie.
+CSRF_COOKIE_HTTPONLY = True
 
 # Production requires users to finish authenticator enrollment before using the
 # dashboard. Local development keeps the old workflow for test fixtures.

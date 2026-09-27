@@ -650,6 +650,8 @@ Before Internet exposure, review this as a privileged database-control applicati
 - With `DJANGO_MFA_REQUIRED=true`, users who have not completed authenticator enrollment are redirected to setup and cannot use the dashboard or API. Enrollment still depends on the initial account password; use controlled account provisioning and rotate temporary passwords.
 - Login and MFA failures are throttled using the configured Django cache. The default local-memory cache is suitable only for the single-worker deployment; use a shared authenticated cache for multiple replicas.
 - Sessions use signed cookies: integrity-protected, not encrypted or centrally stored for per-session revocation. A sessions table does not mean server-side session revocation is active.
+- The app sets a Content Security Policy, same-origin resource policies, a restrictive Permissions Policy, and disables wildcard CORS on WhiteNoise static files. The current templates still use inline JavaScript handlers and styles, so the CSP includes `unsafe-inline`; moving to nonces and removing inline handlers would make it stronger.
+- The CSRF cookie is HttpOnly; HTMX receives the CSRF token from the rendered page. HTMX is pinned with Subresource Integrity. Google Fonts are not loaded from a third party; system font fallbacks are used.
 - Read-only means no mutation, not redacted data. SQL remains visible. Owner webhook URLs are write-only in the API, but staff who can configure notifications can still use those bearer destinations; restrict staff access accordingly.
 - Treat webhooks, SQL literals, CSV payloads, share links, and exported Flow connection/destination identifiers as sensitive. The current `.dockerignore` is not a comprehensive sensitive-artifact filter; keep local DBs and unsanitized exports out of production builds/public repositories.
 - Signed report links are bearer links until expiry. Cleanup is not conditional on confirmed archival; use upload verification and backups.
@@ -658,7 +660,7 @@ Before Internet exposure, review this as a privileged database-control applicati
 - Polling is sampled, not a complete event audit; query age approximates wait duration. Some lock/slot catalog data is server-wide, so registrations on the same PostgreSQL server can overlap.
 - Long-query classification uses active state and username exclusions, not reliable identification of a human/client tool.
 - Teams uses new summary messages, not one updated thread. Delivery success means any webhook accepted, not durable acknowledgement from every destination.
-- The UI currently loads HTMX and fonts externally. Restricted networks may need an appropriate self-hosted asset policy.
+- HTMX is loaded from unpkg with a fixed version and Subresource Integrity. Restricted networks may need a self-hosted copy.
 
 ### Public HTTPS verification
 
