@@ -1,7 +1,7 @@
 {% extends "monitor/base.html" %}
 {% block title %}Users · HealthGrid{% endblock %}
 {% block content %}
-<style>
+<style nonce="{{ request.csp_nonce }}">
   .user-access-summary .metric-card { padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-alt); min-width:0; }
   .access-panel { min-width:0; padding:16px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); }
   .access-panel-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
@@ -180,7 +180,7 @@
   </div>
 </div>
 {% endif %}
-<script>
+<script nonce="{{ request.csp_nonce }}">
   function selectManagedUser(userId) {
     if (userId) window.location.href = '{% url "user-management" %}?user_id=' + encodeURIComponent(userId);
   }

@@ -1,7 +1,7 @@
 {% extends "monitor/base.html" %}
 {% block title %}Instances &middot; HealthGrid{% endblock %}
 {% block content %}
-<style>
+<style nonce="{{ request.csp_nonce }}">
   .instance-heading { min-width:0; flex:1 1 auto; }
   .instance-title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
   .instance-subtitle-row { display:flex; align-items:center; gap:8px; margin-top:4px; }
@@ -125,7 +125,7 @@
     <div><div class="section-hint">Unreachable</div><div id="stat-unreachable" class="kpi-num" style="color:var(--warn-fg);">—</div></div>
   </div>
 </div>
-<style>
+<style nonce="{{ request.csp_nonce }}">
   .kpi-icon { width: 38px; height: 38px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .kpi-num { font-size: 24px; font-weight: 700; line-height: 1.1; margin-top: 3px; font-family: var(--font-mono); letter-spacing: -.03em; }
   .kpi { transition: border-color 120ms ease, box-shadow 120ms ease; }
@@ -163,7 +163,7 @@
 </div>
 
 {% if dashboard_links %}
-<style>
+<style nonce="{{ request.csp_nonce }}">
   .dashboard-link-tile {
     position: relative;
     isolation: isolate;
@@ -222,7 +222,7 @@
 </section>
 {% endif %}
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   var INSTANCE_POLL_INTERVAL = 30;
   var instancePollingPaused = false;
   var instanceManuallyPaused = false;
@@ -264,9 +264,6 @@
   }
 
   function refreshInstanceCards() {
-    // A slow/private RDS endpoint can take longer than the poll interval. Do
-    // not start another batch while the previous batch is still waiting; that
-    // otherwise creates duplicate DB connections and makes the UI slower.
     if (instanceRequestsInFlight > 0) return;
     var cards = document.querySelectorAll('#card-grid > div');
     cards.forEach(function (card) {

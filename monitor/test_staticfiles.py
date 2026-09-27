@@ -1,3 +1,4 @@
+import re
 from tempfile import TemporaryDirectory
 
 from django.contrib.staticfiles.storage import staticfiles_storage
@@ -60,10 +61,32 @@ class ProductionStaticFilesTests(SimpleTestCase):
         manifest = self.client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
         self.assertIn("application/manifest", manifest["Content-Type"])
+        self.assertEqual(manifest["Cache-Control"], "no-cache, no-store, must-revalidate")
         self.assertContains(manifest, '"short_name": "HealthGrid"')
 
         worker = self.client.get("/sw.js")
         self.assertEqual(worker.status_code, 200)
         self.assertIn("application/javascript", worker["Content-Type"])
         self.assertEqual(worker["Service-Worker-Allowed"], "/")
-        self.assertIn(b"Never cache dashboard HTML", worker.content)
+        self.assertEqual(worker["Cache-Control"], "no-cache, no-store, must-revalidate")
+
+    def test_public_metadata_has_explicit_cache_headers(self):
+        for path, content_type in [("/robots.txt", "text/plain"), ("/sitemap.xml", "application/xml")]:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(content_type, response["Content-Type"])
+                self.assertEqual(response["Cache-Control"], "no-cache, no-store, must-revalidate")
+
+    def test_csp_uses_nonce_for_inline_blocks(self):
+        response = self.client.get("/login/")
+        csp = response["Content-Security-Policy"]
+
+        self.assertNotIn("script-src 'self' 'unsafe-inline'", csp)
+        self.assertNotIn("style-src 'self' 'unsafe-inline'", csp)
+        self.assertIn("script-src 'self' 'nonce-", csp)
+        self.assertIn("style-src 'self' 'nonce-", csp)
+
+        nonce = re.search(r"script-src 'self' 'nonce-([^']+)'", csp).group(1)
+        self.assertContains(response, f'<script nonce="{nonce}">')
+        self.assertContains(response, f'<style nonce="{nonce}">')

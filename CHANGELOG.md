@@ -11,7 +11,5 @@ Notable changes to HealthGrid are documented here.
 - Marked the Django CSRF cookie as HttpOnly.
 - Added Subresource Integrity to the pinned HTMX 1.9.12 script.
 - Removed third-party Google Fonts requests; system font fallbacks are used.
-
-### Notes
-
-- The CSP currently permits inline scripts and styles to support existing templates. Replacing those with nonce-based scripts and removing inline event handlers would further strengthen the policy.
+- Switched inline script/style blocks to per-request CSP nonces and removed the broad `unsafe-inline` source from `script-src` and `style-src`.
+- Added explicit no-store cache headers for public metadata endpoints.

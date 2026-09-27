@@ -12,13 +12,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="{% url 'pwa-manifest' %}">
-  <script>
+  <script nonce="{{ request.csp_nonce }}">
     (function () {
       var saved = localStorage.getItem('theme');
       if (saved === 'dark' || saved === 'light') document.documentElement.setAttribute('data-theme', saved);
     })();
   </script>
-  <style>
+  <style nonce="{{ request.csp_nonce }}">
     /* ---- Design tokens -------------------------------------------------- */
     :root {
       color-scheme: light dark;
@@ -339,7 +339,7 @@
           <li class="{{ message.tags }}"><span>{{ message }}</span><button type="button" aria-label="Dismiss message" onclick="this.closest('li').remove()">&times;</button></li>
         {% endfor %}
       </ul>
-      <script>
+      <script nonce="{{ request.csp_nonce }}">
         setTimeout(function () {
           document.querySelectorAll('#messages li.success').forEach(function (li) {
             li.classList.add('fade-out');
@@ -372,7 +372,7 @@
       </div>
     </div>
   </div>
-  <script>
+  <script nonce="{{ request.csp_nonce }}">
     var SUN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
     var MOON_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 
@@ -384,7 +384,6 @@
     function syncThemeToggleIcon() {
       var btn = document.getElementById('theme-toggle');
       if (!btn) return;
-      // Icon shows the theme you'd SWITCH TO, matching common convention.
       btn.innerHTML = currentEffectiveTheme() === 'dark' ? SUN_ICON : MOON_ICON;
     }
     function toggleTheme() {
@@ -431,7 +430,6 @@
         menu.querySelector('summary').focus();
       }
     });
-    // Retain the user's session view across live refreshes.
     var savedSessionView = null;
     document.body.addEventListener('htmx:beforeSwap', function (event) {
       if (window.confirmationOpen) { event.detail.shouldSwap = false; return; }
@@ -542,9 +540,6 @@
     }
 
     function selectLockRole(role) {
-      // Only selects pids that are PURELY this role — e.g. "blocked" skips any
-      // pid that is also blocking someone else further down the chain, so a
-      // mid-chain pid never gets swept up by a quick-select meant for one role.
       var form = document.getElementById('locks-bulk-form');
       if (!form) return;
       var boxes = document.querySelectorAll('input[name=pid][form="' + form.id + '"]');
@@ -561,9 +556,6 @@
       form.requestSubmit();
     }
 
-    // Row action buttons and the "Kill selected" button stay hidden until at
-    // least one pid checkbox is checked — keeps the tables uncluttered when
-    // just browsing, actions surface only once something is actually selected.
     function updateBulkBar(form) {
       if (!form) return;
       var n = document.querySelectorAll('input[name=pid][form="' + form.id + '"]:checked').length;
@@ -600,9 +592,6 @@
       }
     });
 
-    // Client-side filter for a table: hides <tbody> rows whose text doesn't
-    // match the query. data-filter-cols on the input limits which <td>
-    // indexes (0-based, comma-separated) are searched; omit to search the row.
     function filterTable(input, tableId) {
       var table = document.getElementById(tableId);
       if (!table) return;

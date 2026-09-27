@@ -74,7 +74,7 @@
       </label>{% elif instance.exclude_from_global_notifications %}<span class="section-hint">Global Teams exclusion is enabled by an Administrator.</span>{% endif %}
       <button class="btn btn-ghost btn-sm" type="submit">Save owner webhook</button>
     </form>{% endif %}
-    <style>
+    <style nonce="{{ request.csp_nonce }}">
       .control-credentials-panel { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
       .control-credentials-heading { display:flex; align-items:center; gap:8px; margin-bottom:5px; font-size:13.5px; font-weight:700; color:var(--text); }
       .control-credentials-grid { display:grid; grid-template-columns:minmax(220px,1fr) minmax(220px,1fr) auto; align-items:end; gap:12px; }
@@ -185,7 +185,7 @@
 </details>
 {% endif %}
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   function copyEndpoint(btn) {
     var text = '{% if user.is_superuser %}{{ instance.host }}:{{ instance.port }}/{{ instance.db_name }}{% endif %}';
     navigator.clipboard.writeText(text).then(function () {
@@ -235,7 +235,6 @@
     }
   }
 
-  // ---- JS-driven poller: dynamic interval, pause, manual refresh, countdown.
   window.dashboardPollingPaused = false;
   var POLL_TARGETS = ['activity', 'replication-slots-wrap'];
   var pollIntervalSec = parseInt(localStorage.getItem('rds_poll_interval') || '15', 10);
@@ -249,7 +248,6 @@
       if (!el) return;
       var url = el.getAttribute('hx-get');
       if (!url || typeof htmx === 'undefined') return;
-      // show:none stops htmx from scrolling the swapped element into view.
       htmx.ajax('GET', url, { target: '#' + id, swap: 'innerHTML show:none' });
     });
     pollRemaining = pollIntervalSec;
@@ -285,8 +283,6 @@
     }
     setInterval(tick, 1000);
 
-    // Pin scroll position across the swap so an auto-refresh never jumps the
-    // page up/down when a table's row-count (and height) changes.
     var savedScrollY = null;
     document.body.addEventListener('htmx:beforeSwap', function (e) {
       if (e.target && POLL_TARGETS.indexOf(e.target.id) !== -1) savedScrollY = window.scrollY;
