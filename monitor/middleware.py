@@ -9,6 +9,30 @@ from .mfa import has_recent_session_verification
 from .models import UserMFA
 
 
+class BrowserSecurityHeadersMiddleware:
+    """Set a same-origin browser policy on application and static responses."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        response.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'self'; object-src 'none'; "
+            "frame-ancestors 'none'; form-action 'self'; "
+            "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'",
+        )
+        response.setdefault("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=(), usb=()")
+        response.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
+        response.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        response.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+        return response
+
+
 class AdminMFARequiredMiddleware:
     """Route admin sessions through the same per-user MFA verification."""
 
