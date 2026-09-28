@@ -19,7 +19,7 @@ MANIFEST = {
 
 
 SERVICE_WORKER = r"""
-const CACHE_NAME = "healthgrid-static-v1";
+const CACHE_NAME = "healthgrid-static-v2";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -33,6 +33,9 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Network-first: dev/DEBUG static URLs are unhashed (same URL, changing content
+// across deploys), so cache-first would pin a stale response indefinitely once
+// cached. Cache is only a fallback for when the network is unavailable.
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -42,13 +45,13 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
+    fetch(request).then((response) => {
       if (response.ok) {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
       }
       return response;
-    }))
+    }).catch(() => caches.match(request))
   );
 });
 """.strip()

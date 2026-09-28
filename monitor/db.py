@@ -4,6 +4,7 @@ import psycopg2
 import psycopg2.extras
 import pymysql
 import pymysql.cursors
+import pymssql
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -234,6 +235,125 @@ def _mysql_blocking(conn):
     return rows
 
 
+def _is_mssql(instance):
+    return getattr(instance, "engine", "postgresql") == "mssql"
+
+
+# "Idle in transaction" analog: a session with no in-flight request but an open
+# transaction. Plain idle sessions (no request, no open tx) are excluded, same
+# noise filter as the Postgres ACTIVITY_QUERY.
+MSSQL_ACTIVITY_QUERY = """
+    SELECT s.session_id AS pid,
+           s.login_name AS usename,
+           s.host_name AS client_addr,
+           s.program_name AS application_name,
+           CASE
+               WHEN r.session_id IS NOT NULL THEN 'active'
+               WHEN s.open_transaction_count > 0 THEN 'idle in transaction'
+               ELSE 'idle'
+           END AS state,
+           r.wait_type AS wait_event,
+           COALESCE(t.text, tc.text, '') AS query,
+           COALESCE(r.start_time, s.last_request_start_time) AS query_start,
+           DATEDIFF(SECOND, COALESCE(r.start_time, s.last_request_start_time), GETDATE()) AS duration_seconds
+    FROM sys.dm_exec_sessions s
+    LEFT JOIN sys.dm_exec_requests r ON r.session_id = s.session_id
+    LEFT JOIN sys.dm_exec_connections c ON c.session_id = s.session_id
+    OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
+    OUTER APPLY sys.dm_exec_sql_text(c.most_recent_sql_handle) tc
+    WHERE s.is_user_process = 1
+      AND s.session_id <> @@SPID
+      AND s.database_id = DB_ID()
+      AND (r.session_id IS NOT NULL OR s.open_transaction_count > 0)
+    ORDER BY query_start ASC;
+"""
+
+MSSQL_BLOCKING_QUERY = """
+    SELECT
+      r.session_id AS blocked_pid,
+      sb.login_name AS blocked_user,
+      r.blocking_session_id AS blocking_pid,
+      sk.login_name AS blocking_user,
+      COALESCE(tb.text, '') AS blocked_query,
+      COALESCE(tk.text, tkc.text, '') AS blocking_query,
+      r.start_time AS blocked_query_start,
+      DATEDIFF(SECOND, r.start_time, GETDATE()) AS waiting_seconds
+    FROM sys.dm_exec_requests r
+    JOIN sys.dm_exec_sessions sb ON sb.session_id = r.session_id
+    LEFT JOIN sys.dm_exec_sessions sk ON sk.session_id = r.blocking_session_id
+    LEFT JOIN sys.dm_exec_connections ck ON ck.session_id = r.blocking_session_id
+    OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) tb
+    OUTER APPLY (
+        SELECT TOP 1 rk.sql_handle
+        FROM sys.dm_exec_requests rk
+        WHERE rk.session_id = r.blocking_session_id
+    ) bk
+    OUTER APPLY sys.dm_exec_sql_text(bk.sql_handle) tk
+    OUTER APPLY sys.dm_exec_sql_text(ck.most_recent_sql_handle) tkc
+    WHERE r.blocking_session_id <> 0;
+"""
+
+# @@MAX_CONNECTIONS reports the server's configured connection ceiling (memory-
+# derived, not an admin-set cap like Postgres max_connections) — the closest
+# native analog available.
+MSSQL_VITALS_QUERY = """
+    SELECT
+      (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1 AND database_id = DB_ID()) AS total_conns,
+      (SELECT COUNT(*) FROM sys.dm_exec_requests r JOIN sys.dm_exec_sessions s ON s.session_id = r.session_id
+        WHERE s.is_user_process = 1 AND s.database_id = DB_ID()) AS active_conns,
+      (SELECT COUNT(*) FROM sys.dm_exec_sessions s
+        WHERE s.is_user_process = 1 AND s.database_id = DB_ID() AND s.open_transaction_count = 0
+          AND NOT EXISTS (SELECT 1 FROM sys.dm_exec_requests r WHERE r.session_id = s.session_id)) AS idle_conns,
+      (SELECT COUNT(*) FROM sys.dm_exec_sessions s
+        WHERE s.is_user_process = 1 AND s.database_id = DB_ID() AND s.open_transaction_count > 0
+          AND NOT EXISTS (SELECT 1 FROM sys.dm_exec_requests r WHERE r.session_id = s.session_id)) AS idle_in_txn,
+      (SELECT COUNT(*) FROM sys.dm_exec_requests WHERE blocking_session_id <> 0) AS waiting_on_locks,
+      @@MAX_CONNECTIONS AS max_conns,
+      (SELECT CASE
+          WHEN SUM(size) * 8.0 * 1024 >= 1073741824 THEN CAST(CAST(SUM(size) * 8.0 * 1024 / 1073741824 AS DECIMAL(18,2)) AS VARCHAR(20)) + ' GB'
+          ELSE CAST(CAST(SUM(size) * 8.0 / 1024 AS DECIMAL(18,2)) AS VARCHAR(20)) + ' MB'
+       END FROM sys.database_files) AS db_size,
+      COALESCE((
+          SELECT DATEDIFF(SECOND, MIN(r.start_time), GETDATE())
+          FROM sys.dm_exec_requests r
+          JOIN sys.dm_exec_sessions s ON s.session_id = r.session_id
+          WHERE s.is_user_process = 1 AND s.database_id = DB_ID()
+      ), 0) AS longest_active_seconds;
+"""
+
+MSSQL_TOP_TABLES_QUERY = """
+    SELECT TOP 10
+        sch.name + '.' + t.name AS table_name,
+        SUM(a.total_pages) * 8 * 1024 AS total_bytes,
+        CAST(ROUND(SUM(a.total_pages) * 8.0 / 1024 / 1024, 2) AS DECIMAL(18,2)) AS size_gb
+    FROM sys.tables t
+    JOIN sys.schemas sch ON sch.schema_id = t.schema_id
+    JOIN sys.indexes i ON i.object_id = t.object_id
+    JOIN sys.partitions p ON p.object_id = i.object_id AND p.index_id = i.index_id
+    JOIN sys.allocation_units a ON a.container_id = p.partition_id
+    GROUP BY sch.name, t.name
+    ORDER BY SUM(a.total_pages) DESC;
+"""
+
+
+def _mssql_activity(conn):
+    with conn.cursor(as_dict=True) as cur:
+        cur.execute(MSSQL_ACTIVITY_QUERY)
+        return list(cur.fetchall())
+
+
+def _mssql_blocking(conn):
+    with conn.cursor(as_dict=True) as cur:
+        cur.execute(MSSQL_BLOCKING_QUERY)
+        rows = list(cur.fetchall())
+    for row in rows:
+        row["blocked_user"] = row.get("blocked_user") or ""
+        row["blocking_user"] = row.get("blocking_user") or ""
+        row["blocked_query"] = row.get("blocked_query") or ""
+        row["blocking_query"] = row.get("blocking_query") or ""
+    return rows
+
+
 def get_connection(instance):
     """Open an independent control connection to the target RDS instance.
 
@@ -263,6 +383,29 @@ def get_connection(instance):
                 ssl=ssl if instance.ssl_required else None,
                 program_name="healthgrid-control",
             )
+        if _is_mssql(instance):
+            if instance.ssl_required:
+                # pymssql/FreeTDS has no per-connection TLS toggle in this driver
+                # version — encryption depends on the bundled FreeTDS build.
+                # Refuse rather than silently connect without the guarantee the
+                # "SSL required" checkbox implies; uncheck it for this instance
+                # if the target accepts unencrypted connections (e.g. local dev).
+                raise ConnectionError(
+                    "MSSQL connections cannot honor 'SSL required' with the bundled driver. "
+                    "Uncheck SSL required for this instance to connect."
+                )
+            return pymssql.connect(
+                server=instance.host,
+                port=int(instance.port),
+                database=instance.db_name,
+                user=username,
+                password=password,
+                login_timeout=CONNECT_TIMEOUT_SECONDS,
+                timeout=STATEMENT_TIMEOUT_MILLISECONDS // 1000,
+                autocommit=True,
+                as_dict=True,
+                appname="healthgrid-control",
+            )
         return psycopg2.connect(
             host=instance.host,
             port=instance.port,
@@ -289,6 +432,8 @@ def fetch_activity(instance):
     try:
         if _is_mysql(instance):
             return _mysql_activity(instance, conn), _mysql_blocking(conn)
+        if _is_mssql(instance):
+            return _mssql_activity(conn), _mssql_blocking(conn)
         conn.set_session(readonly=True, autocommit=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(ACTIVITY_QUERY)
@@ -302,7 +447,7 @@ def fetch_activity(instance):
 
 def fetch_server_overview(instance):
     """Return read-only database/session/lock totals for a PostgreSQL endpoint."""
-    if _is_mysql(instance):
+    if _is_mysql(instance) or _is_mssql(instance):
         raise ConnectionError("Server-wide database discovery is currently available for PostgreSQL endpoints only.")
     conn = get_connection(instance)
     try:
@@ -367,6 +512,23 @@ def fetch_activity_with_vitals(instance):
                 """, (instance.db_name,))
                 top_tables = list(cur.fetchall())
             return activity, blocking, vitals, top_tables
+        if _is_mssql(instance):
+            activity = _mssql_activity(conn)
+            blocking = _mssql_blocking(conn)
+            with conn.cursor(as_dict=True) as cur:
+                try:
+                    cur.execute(MSSQL_VITALS_QUERY)
+                    vitals = cur.fetchone()
+                except Exception as exc:
+                    logger.warning("vitals query failed for %s: %s", instance, exc)
+                    vitals = None
+                try:
+                    cur.execute(MSSQL_TOP_TABLES_QUERY)
+                    top_tables = list(cur.fetchall())
+                except Exception as exc:
+                    logger.warning("top-tables query failed for %s: %s", instance, exc)
+                    top_tables = []
+            return activity, blocking, vitals, top_tables
         conn.set_session(readonly=True, autocommit=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(ACTIVITY_QUERY)
@@ -409,6 +571,10 @@ def kill_pid(instance, pid, *, allow_replication=False):
             with conn.cursor() as cur:
                 cur.execute(f"KILL CONNECTION {int(pid)}")
             return True
+        if _is_mssql(instance):
+            with conn.cursor() as cur:
+                cur.execute(f"KILL {int(pid)}")
+            return True
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid))
@@ -432,6 +598,15 @@ def kill_pids(instance, pids, *, allow_replication=False):
                     except Exception:
                         results[pid] = False
             return results
+        if _is_mssql(instance):
+            with conn.cursor() as cur:
+                for pid in pids:
+                    try:
+                        cur.execute(f"KILL {int(pid)}")
+                        results[pid] = True
+                    except Exception:
+                        results[pid] = False
+            return results
         conn.autocommit = True
         with conn.cursor() as cur:
             for pid in pids:
@@ -444,7 +619,7 @@ def kill_pids(instance, pids, *, allow_replication=False):
 
 
 def fetch_replication_slots(instance):
-    if _is_mysql(instance):
+    if _is_mysql(instance) or _is_mssql(instance):
         return []
     conn = get_connection(instance)
     try:
@@ -459,7 +634,7 @@ def fetch_replication_slots(instance):
 def terminate_replication_slot_backend(instance, slot_name):
     """Terminate the walsender backend currently consuming a slot (if any),
     e.g. so it can subsequently be dropped. Returns True if a backend was killed."""
-    if _is_mysql(instance):
+    if _is_mysql(instance) or _is_mssql(instance):
         return False
     conn = get_connection(instance)
     try:
@@ -479,7 +654,7 @@ def terminate_replication_slot_backend(instance, slot_name):
 def drop_replication_slot(instance, slot_name):
     """Drop a replication slot outright. Fails if the slot is still active —
     terminate its backend first. Returns (ok, error)."""
-    if _is_mysql(instance):
+    if _is_mysql(instance) or _is_mssql(instance):
         return False, "Replication slots are only supported for PostgreSQL."
     conn = get_connection(instance)
     try:
@@ -513,6 +688,24 @@ def test_connection(engine, host, port, db_name, username, password, ssl_require
                 cursorclass=pymysql.cursors.DictCursor,
                 ssl=ssl if ssl_required else None,
                 program_name="healthgrid-test",
+            )
+            conn.close()
+            return True, None
+        if engine == "mssql":
+            if ssl_required:
+                return False, (
+                    "MSSQL connections cannot honor 'SSL required' with the bundled driver. "
+                    "Uncheck SSL required for this instance to connect."
+                )
+            conn = pymssql.connect(
+                server=host,
+                port=int(port),
+                database=db_name,
+                user=username,
+                password=password,
+                login_timeout=CONNECT_TIMEOUT_SECONDS,
+                timeout=STATEMENT_TIMEOUT_MILLISECONDS // 1000,
+                appname="healthgrid-test",
             )
             conn.close()
             return True, None

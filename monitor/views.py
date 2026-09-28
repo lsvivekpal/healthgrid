@@ -76,6 +76,10 @@ def _save_slot_access(request, user, can_drop, can_terminate):
                detail=f"user={user.username} (id={user.pk}); drop={can_drop}; terminate={can_terminate}")
 
 
+def _default_port_for_engine(engine):
+    return {"mysql": 3306, "mariadb": 3306, "mssql": 1433}.get(engine, 5432)
+
+
 def _fmt_duration(seconds):
     """Compact human duration: 45s, 3m 12s, 1h 04m."""
     try:
@@ -1048,7 +1052,7 @@ def add_instance(request):
                 db_identifier=extend_source.db_identifier if extend_source else request.POST["db_identifier"].strip(),
                 region=extend_source.region if extend_source else request.POST.get("region", "us-east-1").strip(),
                 host=extend_source.host if extend_source else request.POST["host"].strip(),
-                port=extend_source.port if extend_source else request.POST.get("port") or (3306 if request.POST.get("engine") in {"mysql", "mariadb"} else 5432),
+                port=extend_source.port if extend_source else request.POST.get("port") or _default_port_for_engine(request.POST.get("engine")),
                 username=extend_source.username if extend_source else request.POST["username"].strip(),
                 lock_control_enabled=lock_control_enabled,
                 control_username=control_username,

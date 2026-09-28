@@ -1,6 +1,6 @@
 # HealthGrid
 
-A Django application for PostgreSQL, MySQL, and MariaDB lock and session monitoring, controlled backend termination, Teams notifications, and weekly lock-history reports.
+A Django application for PostgreSQL, MySQL, MariaDB, and MSSQL lock and session monitoring, controlled backend termination, Teams notifications, and weekly lock-history reports.
 
 **Author:** [Vivek Pal](https://github.com/lsvivekpal) · **Repository:** [github.com/lsvivekpal/healthgrid](https://github.com/lsvivekpal/healthgrid)
 
@@ -8,7 +8,7 @@ Instances are registered manually. The app connects directly to each registered 
 
 ### Supported database engines
 
-HealthGrid currently supports PostgreSQL, MySQL, and MariaDB. Select the engine when adding an instance so HealthGrid uses the correct connection, activity, lock, and termination commands. PostgreSQL additionally supports replication-slot management. MySQL and MariaDB expose engine-specific session and InnoDB lock monitoring; their lock catalog requires the monitoring user to have access to `information_schema.PROCESSLIST` and the InnoDB lock views.
+HealthGrid currently supports PostgreSQL, MySQL, MariaDB, and MSSQL. Select the engine when adding an instance so HealthGrid uses the correct connection, activity, lock, and termination commands. PostgreSQL additionally supports replication-slot management. MySQL and MariaDB expose engine-specific session and InnoDB lock monitoring; their lock catalog requires the monitoring user to have access to `information_schema.PROCESSLIST` and the InnoDB lock views. MSSQL uses the `sys.dm_exec_sessions`/`sys.dm_exec_requests` dynamic management views for sessions and blocking-chain detection; it does not support replication-slot management, and connections currently require "SSL required" to be unchecked (see [MSSQL privileges and control connections](#mssql-privileges-and-control-connections)).
 
 ## Contents
 
@@ -350,6 +350,31 @@ On MariaDB versions that do not provide the `CONNECTION ADMIN` dynamic privilege
 
 These grants allow visibility and session control only; they do not grant access to application table contents. Restrict the account host pattern, require TLS where available, and store passwords in the deployment secret manager rather than in source control.
 
+### MSSQL privileges and control connections
+
+Use a dedicated login with the server-level `VIEW SERVER STATE` permission, which covers the `sys.dm_exec_sessions`/`sys.dm_exec_requests`/`sys.dm_exec_connections` dynamic management views HealthGrid reads for sessions and blocking-chain detection:
+
+```sql
+CREATE LOGIN healthgrid WITH PASSWORD = 'use-a-secret-manager-password';
+GRANT VIEW SERVER STATE TO healthgrid;
+CREATE USER healthgrid FOR LOGIN healthgrid;
+```
+
+The optional dedicated control login additionally needs `ALTER ANY CONNECTION` to run `KILL` against sessions owned by other logins:
+
+```sql
+CREATE LOGIN healthgrid_control WITH PASSWORD = 'use-a-secret-manager-password';
+GRANT VIEW SERVER STATE TO healthgrid_control;
+GRANT ALTER ANY CONNECTION TO healthgrid_control;
+CREATE USER healthgrid_control FOR LOGIN healthgrid_control;
+```
+
+HealthGrid connects with [pymssql](https://github.com/pymssql/pymssql) (bundled FreeTDS, no system ODBC driver required). Control connections use application name `healthgrid-control`, with a 5-second login timeout and an 8-second query timeout.
+
+**SSL limitation:** the bundled pymssql/FreeTDS driver has no per-connection TLS toggle in this version, so HealthGrid cannot honor the "SSL required" checkbox for MSSQL instances. Uncheck it when adding an MSSQL instance — HealthGrid refuses the connection outright rather than silently connecting without the guarantee that setting implies. Encrypt the network path some other way (VPC-only access, a TLS-terminating bastion/proxy, or a private link) if the target requires it.
+
+MSSQL does not have a PostgreSQL-style replication-slot concept; that section of the instance page is hidden for MSSQL instances. `KILL` on MSSQL cannot be scoped the way PostgreSQL's replication-slot guard is — it terminates the session outright.
+
 ## Dashboard and lock control
 
 ### Live views
@@ -680,7 +705,7 @@ Expected results are an HTTP-to-HTTPS redirect, a login redirect over HTTPS, and
 | --- | --- |
 | [config/settings.py](config/settings.py) | Environment, database, session, security, and static settings |
 | [monitor/models.py](monitor/models.py) | Registry, audits/incidents, settings, MFA, grants, reports, lease, dashboard links |
-| [monitor/db.py](monitor/db.py) | PostgreSQL queries, connections/timeouts, guarded PID kills, slot operations |
+| [monitor/db.py](monitor/db.py) | PostgreSQL/MySQL/MariaDB/MSSQL queries, connections/timeouts, guarded PID kills, slot operations |
 | [monitor/views.py](monitor/views.py), [monitor/urls.py](monitor/urls.py) | UI/actions, exports, configuration, API viewsets, routes |
 | [monitor/permissions.py](monitor/permissions.py) | Registry API permissions and operator slot grants |
 | [monitor/mfa.py](monitor/mfa.py), [monitor/auth_views.py](monitor/auth_views.py), [monitor/middleware.py](monitor/middleware.py) | TOTP/recovery, login/onboarding, admin MFA routing |

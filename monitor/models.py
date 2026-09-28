@@ -13,6 +13,7 @@ class RDSInstance(models.Model):
         ("postgresql", "PostgreSQL"),
         ("mysql", "MySQL"),
         ("mariadb", "MariaDB"),
+        ("mssql", "MSSQL"),
     )
     name = models.CharField(max_length=100, help_text="Friendly display name")
     connection_group = models.UUIDField(default=uuid.uuid4, editable=False, db_index=True)
