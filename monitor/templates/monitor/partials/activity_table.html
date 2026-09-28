@@ -55,20 +55,6 @@
       </div>
     </div>
   </div>
-  <style nonce="{{ request.csp_nonce }}">
-    .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 10px; margin-bottom: 16px; }
-    .vital { position: relative; display: flex; align-items: flex-start; gap: 11px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 11px 13px; box-shadow: var(--shadow-sm); overflow: hidden; }
-    .vital::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: .9; }
-    .vital-icon { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
-    .vital-body { min-width: 0; flex: 1; }
-    .vital-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-    .vital-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); white-space: nowrap; }
-    .vital-value { font-family: var(--font-mono); font-size: 19px; font-weight: 700; letter-spacing: -.03em; margin-top: 2px; line-height: 1.15; }
-    .vital-sub { font-size: 12px; font-weight: 500; color: var(--text-faint); }
-    .vital-foot { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
-    .vital-meter { height: 4px; border-radius: 3px; background: var(--surface-3); overflow: hidden; margin-top: 6px; }
-    .vital-meter span { display: block; height: 100%; border-radius: 3px; transition: width 300ms ease; }
-  </style>
   {% endif %}
 
   <div class="card" id="locks" style="{% if blocking %}border-color:var(--danger-fg);{% endif %}">
@@ -276,15 +262,6 @@
     </table>
     </div>
   </div>
-
-  <style nonce="{{ request.csp_nonce }}">
-    .query-with-copy { display:flex; align-items:flex-start; gap:6px; min-width:0; }
-    .query-with-copy .query-preview { flex:1; min-width:0; }
-    .copy-query-btn { flex:0 0 auto; border:1px solid var(--brand); background:var(--brand-soft); color:var(--brand); border-radius:6px; padding:3px 7px; line-height:1.1; cursor:pointer; font-size:12px; font-weight:700; box-shadow:0 1px 2px rgba(37,99,235,.12); transition:background 120ms ease,color 120ms ease,transform 120ms ease; }
-    .copy-query-btn:hover { color:#fff; border-color:var(--brand); background:var(--brand); transform:translateY(-1px); }
-    .copy-query-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-    .copy-query-btn.copied { color:#fff; border-color:var(--ok-fg); background:var(--ok-fg); box-shadow:0 1px 3px rgba(22,163,74,.22); }
-  </style>
 
   {% if top_tables %}
   <div class="card" id="top-tables" style="margin-top:16px;">
