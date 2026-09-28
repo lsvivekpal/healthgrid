@@ -71,8 +71,9 @@
       <option value="postgresql" {% if prefill.engine|default:"postgresql" == "postgresql" %}selected{% endif %}>PostgreSQL</option>
       <option value="mysql" {% if prefill.engine == "mysql" %}selected{% endif %}>MySQL</option>
       <option value="mariadb" {% if prefill.engine == "mariadb" %}selected{% endif %}>MariaDB</option>
+      <option value="mssql" {% if prefill.engine == "mssql" %}selected{% endif %}>MSSQL</option>
     </select>
-    <div class="section-hint" style="margin-top:5px;line-height:1.4;">PostgreSQL supports replication-slot management. MySQL and MariaDB support sessions, locks, and query termination.</div>
+    <div class="section-hint" style="margin-top:5px;line-height:1.4;">PostgreSQL supports replication-slot management. MySQL, MariaDB, and MSSQL support sessions, locks, and query termination. MSSQL connections currently require "SSL required" to be unchecked.</div>
     <label for="id_host">Endpoint host</label>
     <input type="text" name="host" id="id_host" value="{{ prefill.host|default:"" }}" required placeholder="my-app-prod.xxxx.us-east-1.rds.amazonaws.com">
 
@@ -157,9 +158,10 @@
     const engine = document.getElementById('id_engine');
     const port = document.getElementById('id_port');
     if (!engine || !port) return;
+    const DEFAULT_PORTS = { postgresql: '5432', mysql: '3306', mariadb: '3306', mssql: '1433' };
     engine.addEventListener('change', function () {
-      if (port.value === '5432' || port.value === '3306') {
-        port.value = this.value === 'postgresql' ? '5432' : '3306';
+      if (Object.values(DEFAULT_PORTS).includes(port.value)) {
+        port.value = DEFAULT_PORTS[this.value] || '5432';
       }
     });
   }());
