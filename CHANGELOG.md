@@ -2,6 +2,12 @@
 
 Notable changes to HealthGrid are documented here.
 
+## 1.2.0 — 2026-09-29
+
+### Added
+
+- Server-wide database discovery for MSSQL: the instance card's "other databases on this server" list, with per-database session and lock counts. `sys.dm_exec_sessions`/`sys.dm_exec_requests` are server-scoped DMVs, so this needs only one connection (the existing `VIEW SERVER STATE` grant) to see every database's sessions and locks at once — no per-database connection required, unlike the Postgres implementation. MySQL/MariaDB remain unsupported for this feature (no equivalent server-wide session catalog).
+
 ## 1.1.0 — 2026-09-28
 
 ### Added
