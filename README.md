@@ -375,6 +375,8 @@ HealthGrid connects with [pymssql](https://github.com/pymssql/pymssql) (bundled 
 
 MSSQL does not have a PostgreSQL-style replication-slot concept; that section of the instance page is hidden for MSSQL instances. `KILL` on MSSQL cannot be scoped the way PostgreSQL's replication-slot guard is — it terminates the session outright.
 
+Server-wide database discovery (the instance card's "other databases on this server" list) is available for MSSQL using the same `VIEW SERVER STATE` grant above — `sys.dm_exec_sessions`/`sys.dm_exec_requests` are server-scoped DMVs, so one connection sees every database's sessions and locks. MySQL and MariaDB do not support this; their session catalog is scoped per-connection.
+
 ## Dashboard and lock control
 
 ### Live views

@@ -335,6 +335,36 @@ MSSQL_TOP_TABLES_QUERY = """
     ORDER BY SUM(a.total_pages) DESC;
 """
 
+# database_id > 4 excludes the fixed system databases (master, tempdb, model,
+# msdb); state = 0 is ONLINE. sys.dm_exec_sessions/requests are server-scoped
+# DMVs, so unlike Postgres/MySQL this needs only one connection to see every
+# database's sessions and locks at once.
+MSSQL_SERVER_DATABASES_QUERY = """
+    SELECT name AS database_name
+    FROM sys.databases
+    WHERE database_id > 4 AND state = 0
+    ORDER BY name;
+"""
+
+MSSQL_SERVER_ACTIVITY_COUNTS_QUERY = """
+    SELECT DB_NAME(s.database_id) AS database_name,
+           COUNT(*) AS total_sessions,
+           SUM(CASE WHEN r.session_id IS NOT NULL THEN 1 ELSE 0 END) AS active_sessions,
+           SUM(CASE WHEN r.session_id IS NULL THEN 1 ELSE 0 END) AS idle_sessions
+    FROM sys.dm_exec_sessions s
+    LEFT JOIN sys.dm_exec_requests r ON r.session_id = s.session_id
+    WHERE s.is_user_process = 1 AND s.database_id > 4
+    GROUP BY s.database_id;
+"""
+
+MSSQL_SERVER_LOCK_COUNTS_QUERY = """
+    SELECT DB_NAME(sb.database_id) AS database_name, COUNT(*) AS lock_count
+    FROM sys.dm_exec_requests r
+    JOIN sys.dm_exec_sessions sb ON sb.session_id = r.session_id
+    WHERE r.blocking_session_id <> 0 AND sb.database_id > 4
+    GROUP BY sb.database_id;
+"""
+
 
 def _mssql_activity(conn):
     with conn.cursor(as_dict=True) as cur:
@@ -445,12 +475,43 @@ def fetch_activity(instance):
         conn.close()
 
 
+def _databases_from_counts(database_names, activity_counts, lock_counts):
+    databases = []
+    for name in database_names:
+        counts = activity_counts.get(name, {})
+        databases.append({
+            "name": name,
+            "total": int(counts.get("total_sessions") or 0),
+            "active": int(counts.get("active_sessions") or 0),
+            "idle": int(counts.get("idle_sessions") or 0),
+            "locks": int(lock_counts.get(name) or 0),
+        })
+    return {
+        "databases": databases,
+        "total": sum(item["total"] for item in databases),
+        "active": sum(item["active"] for item in databases),
+        "idle": sum(item["idle"] for item in databases),
+        "locks": sum(item["locks"] for item in databases),
+    }
+
+
 def fetch_server_overview(instance):
-    """Return read-only database/session/lock totals for a PostgreSQL endpoint."""
-    if _is_mysql(instance) or _is_mssql(instance):
-        raise ConnectionError("Server-wide database discovery is currently available for PostgreSQL endpoints only.")
+    """Return read-only database/session/lock totals for every database on the
+    server (PostgreSQL and MSSQL only; MySQL/MariaDB lack a cheap server-wide
+    session catalog equivalent)."""
+    if _is_mysql(instance):
+        raise ConnectionError("Server-wide database discovery is currently available for PostgreSQL and MSSQL endpoints only.")
     conn = get_connection(instance)
     try:
+        if _is_mssql(instance):
+            with conn.cursor(as_dict=True) as cur:
+                cur.execute(MSSQL_SERVER_DATABASES_QUERY)
+                database_names = [row["database_name"] for row in cur.fetchall()]
+                cur.execute(MSSQL_SERVER_ACTIVITY_COUNTS_QUERY)
+                activity_counts = {row["database_name"]: row for row in cur.fetchall()}
+                cur.execute(MSSQL_SERVER_LOCK_COUNTS_QUERY)
+                lock_counts = {row["database_name"]: row["lock_count"] for row in cur.fetchall()}
+            return _databases_from_counts(database_names, activity_counts, lock_counts)
         conn.set_session(readonly=True, autocommit=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(SERVER_DATABASES_QUERY)
@@ -459,23 +520,7 @@ def fetch_server_overview(instance):
             activity_counts = {row["database_name"]: row for row in cur.fetchall()}
             cur.execute(SERVER_LOCK_COUNTS_QUERY)
             lock_counts = {row["database_name"]: row["lock_count"] for row in cur.fetchall()}
-        databases = []
-        for name in database_names:
-            counts = activity_counts.get(name, {})
-            databases.append({
-                "name": name,
-                "total": int(counts.get("total_sessions") or 0),
-                "active": int(counts.get("active_sessions") or 0),
-                "idle": int(counts.get("idle_sessions") or 0),
-                "locks": int(lock_counts.get(name) or 0),
-            })
-        return {
-            "databases": databases,
-            "total": sum(item["total"] for item in databases),
-            "active": sum(item["active"] for item in databases),
-            "idle": sum(item["idle"] for item in databases),
-            "locks": sum(item["locks"] for item in databases),
-        }
+        return _databases_from_counts(database_names, activity_counts, lock_counts)
     finally:
         conn.close()
 
