@@ -173,6 +173,8 @@ class GuardedTerminationTests(SimpleTestCase):
             self.assertFalse(call.args[1][0])
         self.assertIn("pg_replication_slots WHERE active_pid", db.GUARDED_TERMINATE_QUERY)
         self.assertIn("ELSE FALSE", db.GUARDED_TERMINATE_QUERY)
+        # Termination must be bound to the instance's own database.
+        self.assertIn("datname = current_database()", db.GUARDED_TERMINATE_QUERY)
 
     def test_explicit_permission_is_passed_to_guarded_statement(self):
         connection = MagicMock()
@@ -180,4 +182,4 @@ class GuardedTerminationTests(SimpleTestCase):
         cursor.fetchone.return_value = (True,)
         with patch.object(db, "get_connection", return_value=connection):
             self.assertTrue(db.kill_pid(object(), 123, allow_replication=True))
-        cursor.execute.assert_called_once_with(db.GUARDED_TERMINATE_QUERY, (True, 123, 123))
+        cursor.execute.assert_called_once_with(db.GUARDED_TERMINATE_QUERY, (True, 123, 123, 123))

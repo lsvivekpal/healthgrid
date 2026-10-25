@@ -170,6 +170,12 @@ class RDSInstanceViewSet(viewsets.ModelViewSet):
         instance = serializer.save(added_by=self.request.user)
         _log_audit(instance, "add_instance", self.request.user)
 
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if not can_operate_instance(self.request.user, instance):
+            raise APIPermissionDenied("You do not have operate access to this instance.")
+        serializer.save()
+
     def perform_destroy(self, instance):
         _require_administrator(self.request)
         if not require_mfa_for_action(self.request, self.request.data.get("mfa_code", ""), require_code=True):
@@ -184,7 +190,13 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
-        qs = AuditLog.objects.all()
+        qs = AuditLog.objects.select_related("performed_by", "instance")
+        user = self.request.user
+        if not user.is_superuser:
+            # Non-superusers only see audit rows for instances they can access.
+            # This also excludes global (instance=NULL) rows, which can reveal
+            # Administrator-only grant changes.
+            qs = qs.filter(instance__in=accessible_instances(user))
         instance_id = self.request.query_params.get("instance")
         if instance_id:
             qs = qs.filter(instance_id=instance_id)

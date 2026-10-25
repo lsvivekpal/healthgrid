@@ -183,6 +183,7 @@ MYSQL_LOCK_QUERY = """
       ON blocked_process.ID = waiting_trx.trx_mysql_thread_id
     LEFT JOIN information_schema.PROCESSLIST blocking_process
       ON blocking_process.ID = blocking_trx.trx_mysql_thread_id
+    WHERE blocked_process.DB = %s
 """
 
 MYSQL_PERFORMANCE_LOCK_QUERY = """
@@ -202,6 +203,7 @@ MYSQL_PERFORMANCE_LOCK_QUERY = """
       ON requesting_thread.THREAD_ID = requesting_lock.THREAD_ID
     JOIN performance_schema.threads blocking_thread
       ON blocking_thread.THREAD_ID = blocking_lock.THREAD_ID
+    WHERE requesting_thread.PROCESSLIST_DB = %s
 """
 
 
@@ -211,14 +213,14 @@ def _mysql_activity(instance, conn):
         return list(cur.fetchall())
 
 
-def _mysql_blocking(conn):
+def _mysql_blocking(instance, conn):
     with conn.cursor() as cur:
         try:
-            cur.execute(MYSQL_LOCK_QUERY)
+            cur.execute(MYSQL_LOCK_QUERY, (instance.db_name,))
             rows = list(cur.fetchall())
         except Exception:
             try:
-                cur.execute(MYSQL_PERFORMANCE_LOCK_QUERY)
+                cur.execute(MYSQL_PERFORMANCE_LOCK_QUERY, (instance.db_name,))
                 rows = list(cur.fetchall())
             except Exception:
                 # Keep monitoring available when the optional lock catalog is
@@ -290,7 +292,8 @@ MSSQL_BLOCKING_QUERY = """
     ) bk
     OUTER APPLY sys.dm_exec_sql_text(bk.sql_handle) tk
     OUTER APPLY sys.dm_exec_sql_text(ck.most_recent_sql_handle) tkc
-    WHERE r.blocking_session_id <> 0;
+    WHERE r.blocking_session_id <> 0
+      AND sb.database_id = DB_ID();
 """
 
 # @@MAX_CONNECTIONS reports the server's configured connection ceiling (memory-
@@ -461,7 +464,7 @@ def fetch_activity(instance):
     conn = get_connection(instance)
     try:
         if _is_mysql(instance):
-            return _mysql_activity(instance, conn), _mysql_blocking(conn)
+            return _mysql_activity(instance, conn), _mysql_blocking(instance, conn)
         if _is_mssql(instance):
             return _mssql_activity(conn), _mssql_blocking(conn)
         conn.set_session(readonly=True, autocommit=True)
@@ -532,7 +535,7 @@ def fetch_activity_with_vitals(instance):
     try:
         if _is_mysql(instance):
             activity = _mysql_activity(instance, conn)
-            blocking = _mysql_blocking(conn)
+            blocking = _mysql_blocking(instance, conn)
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT COUNT(*) AS total_conns,
@@ -599,13 +602,37 @@ def fetch_activity_with_vitals(instance):
 
 # Check slot membership in the same statement as termination. Generic PID and
 # bulk/lock-chain routes must not bypass the operator's slot-termination grant.
+# The datname guard binds termination to the database this instance connects to,
+# so a PID belonging to another database on the same server cannot be killed.
 GUARDED_TERMINATE_QUERY = """
 SELECT CASE
-    WHEN %s OR NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE active_pid = %s)
+    WHEN (%s OR NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE active_pid = %s))
+         AND EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = %s AND datname = current_database())
     THEN pg_terminate_backend(%s)
     ELSE FALSE
 END;
 """
+
+
+def _mysql_pid_in_db(cur, pid, db_name):
+    """True when MySQL thread `pid` is attached to the instance's database.
+    Binds KILL to the registered database so a thread on another schema on the
+    same server cannot be terminated through the dashboard."""
+    cur.execute(
+        "SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID = %s AND DB = %s",
+        (int(pid), db_name),
+    )
+    return bool(cur.fetchone()[0])
+
+
+def _mssql_pid_in_db(cur, pid):
+    """True when the MSSQL session `pid` is in the currently-connected database
+    (DB_ID()). Binds KILL to the registered database so a session on another
+    database on the same server cannot be terminated through the dashboard."""
+    cur.execute(
+        f"SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE session_id = {int(pid)} AND database_id = DB_ID()"
+    )
+    return bool(cur.fetchone()[0])
 
 
 def kill_pid(instance, pid, *, allow_replication=False):
@@ -614,15 +641,19 @@ def kill_pid(instance, pid, *, allow_replication=False):
     try:
         if _is_mysql(instance):
             with conn.cursor() as cur:
+                if not _mysql_pid_in_db(cur, pid, instance.db_name):
+                    return False
                 cur.execute(f"KILL CONNECTION {int(pid)}")
             return True
         if _is_mssql(instance):
             with conn.cursor() as cur:
+                if not _mssql_pid_in_db(cur, pid):
+                    return False
                 cur.execute(f"KILL {int(pid)}")
             return True
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid))
+            cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid, pid))
             (terminated,) = cur.fetchone()
         return bool(terminated)
     finally:
@@ -638,6 +669,9 @@ def kill_pids(instance, pids, *, allow_replication=False):
             with conn.cursor() as cur:
                 for pid in pids:
                     try:
+                        if not _mysql_pid_in_db(cur, pid, instance.db_name):
+                            results[pid] = False
+                            continue
                         cur.execute(f"KILL CONNECTION {int(pid)}")
                         results[pid] = True
                     except Exception:
@@ -647,6 +681,9 @@ def kill_pids(instance, pids, *, allow_replication=False):
             with conn.cursor() as cur:
                 for pid in pids:
                     try:
+                        if not _mssql_pid_in_db(cur, pid):
+                            results[pid] = False
+                            continue
                         cur.execute(f"KILL {int(pid)}")
                         results[pid] = True
                     except Exception:
@@ -655,7 +692,7 @@ def kill_pids(instance, pids, *, allow_replication=False):
         conn.autocommit = True
         with conn.cursor() as cur:
             for pid in pids:
-                cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid))
+                cur.execute(GUARDED_TERMINATE_QUERY, (allow_replication, pid, pid, pid))
                 (terminated,) = cur.fetchone()
                 results[pid] = bool(terminated)
         return results
