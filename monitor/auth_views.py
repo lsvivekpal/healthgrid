@@ -132,10 +132,16 @@ def mfa_setup(request):
     if request.method == "POST":
         action = request.POST.get("action", "confirm")
         if action == "regenerate":
-            new_enrollment(profile)
-            messages.success(request, "A new authenticator setup secret was generated. The previous secret is no longer valid.")
-            return redirect("mfa-setup")
-        if action == "reset" and profile.enabled:
+            # Regenerating silently rotates the secret and wipes recovery codes.
+            # On an already-enabled profile that is an MFA reset, so it must go
+            # through the "reset" path, which requires a current code.
+            if profile.enabled:
+                error = "MFA is already enabled. Use Reset with a current authenticator or recovery code to change it."
+            else:
+                new_enrollment(profile)
+                messages.success(request, "A new authenticator setup secret was generated. The previous secret is no longer valid.")
+                return redirect("mfa-setup")
+        elif action == "reset" and profile.enabled:
             if verify_code(profile, request.POST.get("code", "")):
                 new_enrollment(profile)
                 messages.success(request, "MFA was reset. Scan the new QR code and confirm it to enable MFA again.")

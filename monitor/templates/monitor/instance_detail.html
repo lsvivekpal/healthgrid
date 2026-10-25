@@ -53,7 +53,7 @@
       </a>
       {% if user.is_superuser %}
       <form class="inline" method="post" action="{% url 'instance-remove' instance.pk %}" data-requires-mfa="true"
-            onsubmit="return confirmKill(event, 'Remove {{ instance.name }} from the dashboard? This does not affect the RDS instance itself.');">
+            onsubmit="return confirmKill(event, 'Remove {{ instance.name|escapejs }} from the dashboard? This does not affect the RDS instance itself.');">
         {% csrf_token %}
         <button class="btn btn-ghost btn-sm" type="submit">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -175,7 +175,7 @@
   </summary>
   <div id="kill-by-pid-body">
     <form class="inline" method="post" action="{% url 'instance-kill' instance.pk %}" data-requires-mfa="true"
-          onsubmit="return confirmKill(event, 'Terminate backend pid ' + this.pid.value + ' on {{ instance.name }}? This cannot be undone.');"
+          onsubmit="return confirmKill(event, 'Terminate backend pid ' + this.pid.value + ' on {{ instance.name|escapejs }}? This cannot be undone.');"
           style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;">
       {% csrf_token %}
       <input type="number" name="pid" placeholder="PID" required style="width:140px;">
