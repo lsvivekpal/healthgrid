@@ -20,6 +20,7 @@ from .mfa import (
     qr_data_uri,
     verify_code,
     mark_session_verified,
+    mark_session_mfa_passed,
 )
 from .models import UserMFA
 
@@ -115,6 +116,7 @@ def mfa_verify(request):
             backend = request.session.get(PENDING_BACKEND_SESSION_KEY) or settings.AUTHENTICATION_BACKENDS[0]
             login(request, user, backend=backend)
             mark_session_verified(request)
+            mark_session_mfa_passed(request)
             for key in (PENDING_USER_SESSION_KEY, PENDING_BACKEND_SESSION_KEY, PENDING_NEXT_SESSION_KEY):
                 request.session.pop(key, None)
             return redirect(next_url)
@@ -149,6 +151,10 @@ def mfa_setup(request):
             error = "Enter a valid current authenticator or recovery code to reset MFA."
         elif not profile.enabled:
             if action == "confirm" and confirm_enrollment(profile, request.POST.get("code", "")):
+                # First enrollment counts as passing MFA for this session, so the
+                # user is not immediately bounced back to the login page.
+                mark_session_verified(request)
+                mark_session_mfa_passed(request)
                 messages.success(request, "Google Authenticator MFA is enabled for your account.")
                 return redirect("instance-list")
             error = "Enter the 6-digit code shown by your authenticator app to confirm setup."

@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pyotp
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.urls import reverse
 from datetime import datetime, time, timedelta, timezone as datetime_timezone
@@ -298,6 +298,38 @@ class MFASecurityTests(TestCase):
             response = self.client.post(reverse("instance-kill-lock", args=[self.instance.pk]), {"pid": 321})
         self.assertEqual(response.status_code, 302)
         mock_kill.assert_called_once_with(self.instance, 321)
+
+
+@override_settings(MFA_REQUIRED=True)
+class AdminLoginMFABypassTests(TestCase):
+    """A password-only session (as Django admin's login would mint) must not
+    reach the dashboard or API when MFA is enrolled — it has not passed MFA."""
+
+    def setUp(self):
+        self.instance = make_instance()
+        self.staff = User.objects.create_user("bypass-staffer", password="pw", is_staff=True)
+        profile = UserMFA.objects.create(user=self.staff)
+        self.secret, _codes = new_enrollment(profile)
+        self.assertTrue(confirm_enrollment(profile, pyotp.TOTP(self.secret).now()))
+
+    def test_password_only_session_cannot_reach_dashboard(self):
+        # force_login mints an authenticated session without the MFA-passed flag,
+        # exactly like admin/login/ would.
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("instance-list"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_admin_login_redirects_to_mfa_login(self):
+        response = self.client.get("/admin/login/")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith(reverse("login")))
+
+    def test_full_mfa_login_reaches_dashboard(self):
+        self.client.post(reverse("login"), {"username": "bypass-staffer", "password": "pw"})
+        self.client.post(reverse("mfa-verify"), {"code": pyotp.TOTP(self.secret).now()})
+        response = self.client.get(reverse("instance-list"))
+        self.assertEqual(response.status_code, 200)
 
     def test_lock_bulk_kill_requires_mfa(self):
         _profile, secret = self.enroll()
