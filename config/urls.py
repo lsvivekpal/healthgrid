@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.http import HttpResponse, JsonResponse
 from django.urls import include, path
+from django.views.generic import RedirectView
 
 from monitor.auth_views import DashboardLoginView, mfa_verify
 from monitor.pwa import manifest, service_worker
@@ -28,6 +29,9 @@ def sitemap_xml(request):
 
 
 urlpatterns = [
+    # Django admin's own login is password-only and would bypass MFA. Route it
+    # through the dashboard login, which enforces TOTP, before mounting admin.
+    path("admin/login/", RedirectView.as_view(pattern_name="login", query_string=True)),
     path("admin/", admin.site.urls),
     path("healthz", healthz, name="healthz"),
     path("robots.txt", robots_txt, name="robots-txt"),

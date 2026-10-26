@@ -6,8 +6,12 @@ from django.conf import settings
 from django.shortcuts import redirect
 from django.urls import reverse
 
-from .mfa import has_recent_session_verification
+from .mfa import has_recent_session_verification, session_passed_mfa
 from .models import UserMFA
+
+# Paths an authenticated-but-not-yet-MFA-verified session must still reach so it
+# can complete (or set up) MFA, plus logout.
+_MFA_EXEMPT_PATHS = {"/login/", "/logout/", "/mfa/verify/", "/settings/security/mfa/"}
 
 
 class BrowserSecurityHeadersMiddleware:
@@ -47,8 +51,10 @@ class AdminMFARequiredMiddleware:
         if (
             settings.MFA_REQUIRED
             and request.user.is_authenticated
-            and request.path not in {"/logout/", "/settings/security/mfa/"}
+            and request.path not in _MFA_EXEMPT_PATHS
+            and not request.path.startswith("/static/")
             and not request.path.startswith("/admin/login")
+            and not request.path.startswith("/admin/logout")
         ):
             try:
                 profile = request.user.mfa_profile
@@ -56,6 +62,13 @@ class AdminMFARequiredMiddleware:
                 profile = None
             if not profile or not profile.enabled:
                 return redirect(f"{reverse('mfa-setup')}?next={quote(request.get_full_path(), safe='/?:=&')}")
+            # MFA is enrolled: this session must also have passed it. A session
+            # created by the password-only Django admin login never set this
+            # flag, so it is bounced back to the MFA-enforcing dashboard login.
+            if not session_passed_mfa(request):
+                next_url = quote(request.get_full_path(), safe="/?:=&")
+                logout(request)
+                return redirect(f"{reverse('login')}?next={next_url}")
         if (
             request.path.startswith("/admin/")
             and not request.path.startswith("/admin/login")

@@ -18,6 +18,11 @@ PENDING_BACKEND_SESSION_KEY = "mfa_pending_backend"
 PENDING_NEXT_SESSION_KEY = "mfa_pending_next"
 MFA_VERIFIED_AT_SESSION_KEY = "mfa_verified_at"
 MFA_STEP_UP_MAX_AGE_SECONDS = 300
+# Set once a session has fully passed MFA (TOTP/recovery at login, or first
+# enrollment). Unlike the 300s step-up timestamp this does not expire; it marks
+# the whole session as MFA-authenticated. Holds the user pk it was issued for so
+# a recycled session key cannot carry it to another account.
+MFA_SESSION_OK_KEY = "mfa_session_ok"
 
 
 def generate_backup_codes(count=10):
@@ -103,6 +108,19 @@ def confirm_enrollment(profile, code):
 
 def mark_session_verified(request):
     request.session[MFA_VERIFIED_AT_SESSION_KEY] = timezone.now().timestamp()
+
+
+def mark_session_mfa_passed(request):
+    """Flag the session as having fully passed MFA for the current user."""
+    request.session[MFA_SESSION_OK_KEY] = request.user.pk
+
+
+def session_passed_mfa(request):
+    """True when this session passed MFA as the currently-authenticated user."""
+    return (
+        request.user.is_authenticated
+        and request.session.get(MFA_SESSION_OK_KEY) == request.user.pk
+    )
 
 
 def has_recent_session_verification(request):
