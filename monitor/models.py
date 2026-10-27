@@ -46,6 +46,20 @@ class RDSInstance(models.Model):
         blank=True,
         help_text="Fernet-encrypted control role password",
     )
+    query_runner_enabled = models.BooleanField(
+        default=False,
+        help_text="Allow the dedicated query-runner credentials to execute ad-hoc INSERT/UPDATE statements; Administrator-only setting",
+    )
+    query_runner_username = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Dedicated DB role used only for ad-hoc INSERT/UPDATE execution",
+    )
+    query_runner_password_encrypted = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Fernet-encrypted query-runner role password",
+    )
     ssl_required = models.BooleanField(
         default=True, help_text="Uncheck for local/dev Postgres without SSL"
     )
@@ -72,6 +86,62 @@ class RDSInstance(models.Model):
 
     def get_control_password(self):
         return crypto.decrypt_password(self.control_password_encrypted)
+
+    def set_query_runner_password(self, raw_password):
+        self.query_runner_password_encrypted = crypto.encrypt_password(raw_password)
+
+    def get_query_runner_password(self):
+        return crypto.decrypt_password(self.query_runner_password_encrypted)
+
+
+class QueryRunnerGrant(models.Model):
+    """Administrator-delegated permission for a user to execute ad-hoc
+    INSERT/UPDATE statements against one instance's dedicated query-runner role."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="query_runner_grants")
+    instance = models.ForeignKey(RDSInstance, on_delete=models.CASCADE, related_name="query_runner_grants")
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "instance"], name="unique_user_query_runner_grant")]
+        ordering = ["instance__name"]
+
+    def __str__(self):
+        return f"{self.user} → {self.instance} (query runner)"
+
+
+class QueryRunnerExecution(models.Model):
+    """Full record of one query-runner attempt: preview (rolled back), then
+    an explicit commit or discard. Nothing commits automatically — a preview
+    always rolls back and only exists to show row impact before the user
+    decides."""
+
+    STATUS_CHOICES = [
+        ("pending", "Pending commit"),
+        ("committed", "Committed"),
+        ("discarded", "Discarded"),
+        ("failed", "Failed"),
+    ]
+
+    instance = models.ForeignKey(RDSInstance, on_delete=models.CASCADE, related_name="query_runner_executions")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="query_runner_executions"
+    )
+    sql = models.TextField()
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="pending")
+    rows_affected = models.IntegerField(null=True, blank=True)
+    error = models.TextField(blank=True)
+    previewed_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-previewed_at"]
+
+    def __str__(self):
+        return f"{self.user} on {self.instance} [{self.status}]"
 
 
 class UserInstanceAccess(models.Model):
@@ -116,6 +186,7 @@ class AuditLog(models.Model):
         ("remove_instance", "Remove instance"),
         ("rename_instance", "Rename instance"),
         ("update_slot_permissions", "Update replication-slot permissions"),
+        ("run_query", "Run query"),
     ]
 
     instance = models.ForeignKey(

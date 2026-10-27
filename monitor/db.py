@@ -1,4 +1,5 @@
 import logging
+import re
 
 import psycopg2
 import psycopg2.extras
@@ -145,6 +146,31 @@ REPLICATION_SLOTS_QUERY = """
 
 class ConnectionError(Exception):
     pass
+
+
+class QueryValidationError(Exception):
+    pass
+
+
+_WRITE_STATEMENT_RE = re.compile(r"^\s*(INSERT|UPDATE)\s", re.IGNORECASE)
+
+
+def validate_write_statement(sql):
+    """Only a single INSERT or UPDATE statement is allowed through the
+    query-runner role — no other verb, no stacked statements. This is a
+    plain string check, not a SQL parser, so it can't see inside quoted
+    literals; it exists to stop the query-runner role being used as a
+    general-purpose SQL console, not as a full injection defense.
+    """
+    statement = (sql or "").strip()
+    if not statement:
+        raise QueryValidationError("Enter a query to run.")
+    if not _WRITE_STATEMENT_RE.match(statement):
+        raise QueryValidationError("Only INSERT or UPDATE statements are allowed.")
+    body = statement[:-1] if statement.endswith(";") else statement
+    if ";" in body:
+        raise QueryValidationError("Only a single statement is allowed — remove the extra ';'.")
+    return body
 
 
 def _is_mysql(instance):
@@ -457,6 +483,121 @@ def get_connection(instance):
         )
     except Exception as exc:
         raise ConnectionError(str(exc)) from exc
+
+
+def get_query_runner_connection(instance):
+    """Open a connection using the instance's dedicated query-runner role.
+
+    Separate from both the regular login and the lock-control role — this
+    credential is only ever used to execute a single administrator-approved
+    INSERT/UPDATE statement.
+    """
+    if not instance.query_runner_enabled or not instance.query_runner_username:
+        raise ConnectionError("Query-runner credentials are not configured for this instance.")
+    username = instance.query_runner_username
+    password = instance.get_query_runner_password()
+    try:
+        if _is_mysql(instance):
+            ssl = {}
+            if instance.ssl_required and settings.DB_SSL_ROOT_CERT:
+                ssl["ca"] = settings.DB_SSL_ROOT_CERT
+            return pymysql.connect(
+                host=instance.host,
+                port=int(instance.port),
+                database=instance.db_name,
+                user=username,
+                password=password,
+                connect_timeout=CONNECT_TIMEOUT_SECONDS,
+                read_timeout=CONNECT_TIMEOUT_SECONDS,
+                write_timeout=CONNECT_TIMEOUT_SECONDS,
+                autocommit=True,
+                cursorclass=pymysql.cursors.DictCursor,
+                ssl=ssl if instance.ssl_required else None,
+                program_name="healthgrid-query-runner",
+            )
+        if _is_mssql(instance):
+            if instance.ssl_required:
+                raise ConnectionError(
+                    "MSSQL connections cannot honor 'SSL required' with the bundled driver. "
+                    "Uncheck SSL required for this instance to connect."
+                )
+            return pymssql.connect(
+                server=instance.host,
+                port=int(instance.port),
+                database=instance.db_name,
+                user=username,
+                password=password,
+                login_timeout=CONNECT_TIMEOUT_SECONDS,
+                timeout=STATEMENT_TIMEOUT_MILLISECONDS // 1000,
+                autocommit=True,
+                as_dict=True,
+                appname="healthgrid-query-runner",
+            )
+        return psycopg2.connect(
+            host=instance.host,
+            port=instance.port,
+            dbname=instance.db_name,
+            user=username,
+            password=password,
+            connect_timeout=CONNECT_TIMEOUT_SECONDS,
+            sslmode=settings.DB_SSL_MODE if instance.ssl_required else "prefer",
+            **({"sslrootcert": settings.DB_SSL_ROOT_CERT} if instance.ssl_required and settings.DB_SSL_ROOT_CERT else {}),
+            application_name="healthgrid-query-runner",
+            options=(
+                f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS} "
+                f"-c lock_timeout={LOCK_TIMEOUT_MILLISECONDS} "
+                f"-c idle_in_transaction_session_timeout={IDLE_TRANSACTION_TIMEOUT_MILLISECONDS}"
+            ),
+        )
+    except Exception as exc:
+        raise ConnectionError(str(exc)) from exc
+
+
+def preview_write_query(instance, sql):
+    """Run a single INSERT/UPDATE inside a transaction to see its row impact,
+    then roll back. No data is changed. The statement still consumes
+    auto-increment/sequence values on an INSERT preview (ordinary database
+    behavior, not a data change) and briefly holds whatever locks the real
+    statement would. Returns (normalized_statement, rowcount).
+    """
+    statement = validate_write_statement(sql)
+    conn = get_query_runner_connection(instance)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(statement)
+            rowcount = cur.rowcount
+        conn.rollback()
+        return statement, rowcount
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise ConnectionError(str(exc)) from exc
+    finally:
+        conn.close()
+
+
+def commit_write_query(instance, sql):
+    """Re-run and commit a previously previewed INSERT/UPDATE statement using
+    the instance's dedicated query-runner role. Returns the affected row count.
+    """
+    statement = validate_write_statement(sql)
+    conn = get_query_runner_connection(instance)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(statement)
+            rowcount = cur.rowcount
+        conn.commit()
+        return rowcount
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise ConnectionError(str(exc)) from exc
+    finally:
+        conn.close()
 
 
 def fetch_activity(instance):

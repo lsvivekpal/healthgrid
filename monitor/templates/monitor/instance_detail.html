@@ -123,6 +123,67 @@
     {% else %}
     <div class="section-hint" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">Dedicated lock-control credentials are Administrator-only and disabled unless explicitly enabled. This instance currently uses regular DB credentials for monitoring and lock actions.</div>
     {% endif %}
+    {% if is_administrator %}
+    <div class="control-credentials-panel">
+      <div class="control-credentials-heading">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        Query runner
+      </div>
+      <div class="section-hint" style="margin-bottom:12px;line-height:1.45;">Disabled by default. When enabled, delegated users can execute a single INSERT/UPDATE statement using this dedicated role.</div>
+      <form method="post" action="{% url 'instance-query-runner-credentials' instance.pk %}" class="control-credentials-grid">
+      {% csrf_token %}
+      <label style="display:flex;align-items:flex-start;gap:8px;margin:0;grid-column:1/-1;font-weight:400;">
+        <input type="checkbox" name="query_runner_enabled" value="1" {% if instance.query_runner_enabled %}checked{% endif %} style="width:auto;margin-top:3px;">
+        <span>Enable query runner <span class="section-hint" style="display:block;line-height:1.4;">Only Administrators can change this setting.</span></span>
+      </label>
+      <div class="control-credentials-field">
+        <label for="id_query_runner_username">Username</label>
+        <input type="text" name="query_runner_username" id="id_query_runner_username" value="{{ instance.query_runner_username }}" placeholder="db_query_runner">
+      </div>
+      <div class="control-credentials-field">
+        <label for="id_query_runner_password">Password</label>
+        <input type="password" name="query_runner_password" id="id_query_runner_password" placeholder="Required when username is set">
+      </div>
+      <div class="control-credentials-actions">
+        <button class="btn btn-ghost btn-sm" type="submit">Save credentials</button>
+      </div>
+      </form>
+    </div>
+    <form method="post" action="{% url 'instance-test-query-runner-connection' instance.pk %}" class="control-credentials-test">
+      {% csrf_token %}
+      <button class="btn btn-ghost btn-sm" type="submit">Test query-runner connection</button>
+      <span class="section-hint">This role only ever runs the INSERT/UPDATE statement a delegated user submits.</span>
+    </form>
+    <div style="margin-top:16px;">
+      <div class="control-credentials-heading" style="font-size:12.5px;">Delegated access</div>
+      {% if query_runner_grants %}
+      <ul style="list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:6px;">
+        {% for grant in query_runner_grants %}
+        <li style="display:flex;align-items:center;gap:8px;">
+          <span>{{ grant.user.username }}</span>
+          <form class="inline" method="post" action="{% url 'instance-query-runner-grant' instance.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="revoke">
+            <input type="hidden" name="grant_id" value="{{ grant.pk }}">
+            <button class="btn btn-ghost btn-sm" type="submit">Revoke</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="section-hint" style="margin:0 0 10px;">No users have delegate query-runner access yet.</p>
+      {% endif %}
+      <form method="post" action="{% url 'instance-query-runner-grant' instance.pk %}" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="grant">
+        <div class="control-credentials-field" style="max-width:220px;">
+          <label for="id_query_runner_grant_username">Grant access to username</label>
+          <input type="text" name="username" id="id_query_runner_grant_username" placeholder="jdoe">
+        </div>
+        <button class="btn btn-ghost btn-sm" type="submit">Grant access</button>
+      </form>
+    </div>
+    {% endif %}
     {% if can_manage_notifications %}<form method="post" action="{% url 'test-notification' %}" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       {% csrf_token %}
       <input type="hidden" name="destination" value="owner chat">
@@ -181,6 +242,74 @@
       <input type="number" name="pid" placeholder="PID" required style="width:140px;">
       <button class="btn btn-danger btn-sm" type="submit">Kill pid</button>
     </form>
+  </div>
+</details>
+{% endif %}
+
+{% if can_run_queries %}
+<details class="card action-disclosure" style="margin-top:12px;" {% if query_runner_pending %}open{% endif %}>
+  <summary class="card-title" style="font-size:13.5px;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+    Run query
+    <span class="section-hint" style="font-weight:400;">ad-hoc INSERT/UPDATE only, via the dedicated query-runner role</span>
+    <svg class="disclosure-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint);transition:transform 120ms ease;"><polyline points="6 9 12 15 18 9"/></svg>
+  </summary>
+  <div id="run-query-body">
+    <div class="section-hint" style="margin-top:10px;line-height:1.45;">Nothing commits automatically. Previewing runs your statement inside a transaction that's rolled back immediately — review the row impact, then explicitly Commit or Discard. (An INSERT preview can still advance the table's auto-increment counter; that's normal database behavior, not a data change.)</div>
+    <form method="post" action="{% url 'instance-query-runner-preview' instance.pk %}" data-requires-mfa="true"
+          onsubmit="return confirmKill(event, 'Preview this query on {{ instance.name|escapejs }}? It runs in a transaction and rolls back immediately — nothing is committed yet.');"
+          style="margin-top:10px;">
+      {% csrf_token %}
+      <textarea name="sql" rows="5" required placeholder="INSERT INTO ... / UPDATE ... SET ... WHERE ..." style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:13px;"></textarea>
+      <div style="margin-top:8px;">
+        <button class="btn btn-ghost btn-sm" type="submit">Preview query</button>
+      </div>
+    </form>
+
+    {% if query_runner_pending %}
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <div class="control-credentials-heading" style="font-size:12.5px;">Pending — not yet committed</div>
+      {% for execution in query_runner_pending %}
+      <div class="card" style="margin-top:8px;border-color:var(--warn-dot);">
+        <div class="section-hint">{{ execution.user.username }} · {{ execution.previewed_at|date:"Y-m-d H:i:s" }} · {{ execution.rows_affected }} row(s) would be affected</div>
+        <code style="display:block;margin-top:6px;white-space:pre-wrap;font-size:12.5px;">{{ execution.sql }}</code>
+        <div style="margin-top:8px;display:flex;gap:8px;">
+          <form class="inline" method="post" action="{% url 'instance-query-runner-commit' instance.pk execution.pk %}" data-requires-mfa="true"
+                onsubmit="return confirmKill(event, 'Commit this query on {{ instance.name|escapejs }}? This cannot be undone.');">
+            {% csrf_token %}
+            <button class="btn btn-danger btn-sm" type="submit">Commit</button>
+          </form>
+          <form class="inline" method="post" action="{% url 'instance-query-runner-discard' instance.pk execution.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-ghost btn-sm" type="submit">Discard</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if query_runner_history %}
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <div class="control-credentials-heading" style="font-size:12.5px;">Recent query runs</div>
+      <div class="table-scroll">
+      <table class="responsive-table" style="margin-top:8px;">
+        <thead><tr><th>When</th><th>Who</th><th>Status</th><th>Rows</th><th>Query</th></tr></thead>
+        <tbody>
+          {% for execution in query_runner_history %}
+          <tr>
+            <td data-label="When">{{ execution.resolved_at|default:execution.previewed_at|date:"Y-m-d H:i:s" }}</td>
+            <td data-label="Who">{{ execution.user.username }}</td>
+            <td data-label="Status"><span class="badge {% if execution.status == 'committed' %}badge-ok{% elif execution.status == 'failed' %}badge-danger{% else %}badge-muted{% endif %}">{{ execution.get_status_display }}</span></td>
+            <td data-label="Rows">{{ execution.rows_affected|default:"—" }}</td>
+            <td data-label="Query"><code class="query-preview" title="{{ execution.sql }}">{{ execution.sql|truncatechars:80 }}</code></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </details>
 {% endif %}

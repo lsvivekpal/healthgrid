@@ -1,6 +1,6 @@
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
-from .models import RDSInstance, ReplicationSlotAccess, UserInstanceAccess, UserInstanceAccessScope
+from .models import QueryRunnerGrant, RDSInstance, ReplicationSlotAccess, UserInstanceAccess, UserInstanceAccessScope
 
 
 def instance_role(user, instance):
@@ -64,6 +64,16 @@ def accessible_instances(user):
     ):
         return queryset
     return queryset.filter(user_access_grants__user=user).distinct()
+
+
+def can_run_queries(user, instance):
+    if not (user and user.is_authenticated and user.is_active):
+        return False
+    if not instance.query_runner_enabled:
+        return False
+    if user.is_superuser:
+        return True
+    return QueryRunnerGrant.objects.filter(user=user, instance=instance).exists()
 
 
 def can_manage_replication_slot(user, action):
