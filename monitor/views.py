@@ -26,9 +26,9 @@ from rest_framework.exceptions import PermissionDenied as APIPermissionDenied
 
 from . import db
 from .mfa import require_mfa_for_action
-from .models import AuditLog, DashboardLink, LockAlert, LockReport, NotificationSettings, RDSInstance, ReplicationSlotAccess, UserInstanceAccess, UserInstanceAccessScope
+from .models import AuditLog, DashboardLink, LockAlert, LockReport, NotificationSettings, QueryRunnerExecution, QueryRunnerGrant, RDSInstance, ReplicationSlotAccess, UserInstanceAccess, UserInstanceAccessScope
 from .notifications import REPORT_MAX_AGE_SECONDS, send_test_notification, send_weekly_reports
-from .permissions import IsStaffOrReadOnly, accessible_instances, can_manage_global_notifications, can_manage_instance_notifications, can_manage_replication_slot, can_operate_instance, can_view_instance
+from .permissions import IsStaffOrReadOnly, accessible_instances, can_manage_global_notifications, can_manage_instance_notifications, can_manage_replication_slot, can_operate_instance, can_run_queries, can_view_instance
 from .serializers import AuditLogSerializer, RDSInstanceSerializer
 
 logger = logging.getLogger(__name__)
@@ -668,6 +668,15 @@ def instance_detail(request, pk):
     instance = get_object_or_404(RDSInstance, pk=pk)
     _require_instance_access(request, instance)
     audit_logs = instance.audit_logs.all()[:25]
+    allowed_to_run_queries = can_run_queries(request.user, instance)
+    query_runner_pending = None
+    query_runner_history = None
+    if allowed_to_run_queries:
+        executions = QueryRunnerExecution.objects.filter(instance=instance).select_related("user")
+        if not request.user.is_superuser:
+            executions = executions.filter(user=request.user)
+        query_runner_pending = executions.filter(status="pending")[:10]
+        query_runner_history = executions.exclude(status="pending")[:10]
     return render(
         request,
         "monitor/instance_detail.html",
@@ -676,6 +685,12 @@ def instance_detail(request, pk):
             "audit_logs": audit_logs,
             "can_operate_instance": can_operate_instance(request.user, instance),
             "can_manage_notifications": can_manage_instance_notifications(request.user, instance),
+            "can_run_queries": allowed_to_run_queries,
+            "query_runner_pending": query_runner_pending,
+            "query_runner_history": query_runner_history,
+            "query_runner_grants": (
+                instance.query_runner_grants.select_related("user") if request.user.is_superuser else None
+            ),
             "is_administrator": request.user.is_superuser,
         },
     )
@@ -897,7 +912,7 @@ def _kill_session_impl(request, pk, *, lock_only=False):
         except db.ConnectionError as exc:
             messages.error(request, f"Could not verify the lock before killing pid {pid}: {exc}")
             return redirect("instance-detail", pk=instance.pk)
-    elif not _require_action_mfa(request, instance, "kill_session", detail=f"pid={pid}"):
+    elif not _require_action_mfa(request, instance, "kill_session", detail=f"pid={pid}", require_code=True):
         return redirect("instance-detail", pk=instance.pk)
 
     try:
@@ -954,7 +969,7 @@ def _kill_chain_impl(request, pk, *, lock_only=False, require_mfa=False):
     if not pids:
         messages.error(request, "Select at least one backend PID first.")
         return redirect("instance-detail", pk=instance.pk)
-    if require_mfa and not _require_action_mfa(request, instance, action, detail=f"pids={pids}"):
+    if require_mfa and not _require_action_mfa(request, instance, action, detail=f"pids={pids}", require_code=True):
         return redirect("instance-detail", pk=instance.pk)
     if lock_only:
         try:
@@ -1256,6 +1271,192 @@ def update_control_credentials(request, pk):
         instance.control_password_encrypted = ""
     instance.save(update_fields=["lock_control_enabled", "control_username", "control_password_encrypted"])
     messages.success(request, "Lock-control credentials saved. They are enabled only when the Administrator switch is on.")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def update_query_runner_credentials(request, pk):
+    _require_administrator(request)
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
+    query_runner_enabled = bool(request.POST.get("query_runner_enabled"))
+    query_runner_username = request.POST.get("query_runner_username", "").strip() if query_runner_enabled else ""
+    query_runner_password = request.POST.get("query_runner_password", "") if query_runner_enabled else ""
+    if query_runner_enabled and not query_runner_username:
+        messages.error(request, "A dedicated query-runner username is required to enable this feature.")
+        return redirect("instance-detail", pk=instance.pk)
+    if (
+        query_runner_enabled
+        and query_runner_username
+        and not query_runner_password
+        and (
+            not instance.query_runner_password_encrypted
+            or not instance.query_runner_enabled
+            or query_runner_username != instance.query_runner_username
+        )
+    ):
+        messages.error(request, "Enter the query-runner password.")
+        return redirect("instance-detail", pk=instance.pk)
+
+    instance.query_runner_enabled = query_runner_enabled
+    instance.query_runner_username = query_runner_username
+    if query_runner_username:
+        if query_runner_password:
+            instance.set_query_runner_password(query_runner_password)
+    else:
+        instance.query_runner_password_encrypted = ""
+    instance.save(update_fields=["query_runner_enabled", "query_runner_username", "query_runner_password_encrypted"])
+    messages.success(request, "Query-runner credentials saved. They are enabled only when the Administrator switch is on.")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def test_query_runner_connection(request, pk):
+    _require_administrator(request)
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
+    if not instance.query_runner_enabled:
+        messages.error(request, "The query runner is disabled for this instance.")
+        return redirect("instance-detail", pk=instance.pk)
+    try:
+        conn = db.get_query_runner_connection(instance)
+        conn.close()
+        messages.success(request, "Query-runner connection succeeded.")
+    except db.ConnectionError as exc:
+        messages.error(request, f"Query-runner connection failed: {exc}")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def query_runner_grant(request, pk):
+    """Administrator-only: delegate or revoke a user's query-runner access to one instance."""
+    _require_administrator(request)
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance, write=True)
+    action = request.POST.get("action", "grant")
+
+    if action == "revoke":
+        try:
+            grant_id = int(request.POST.get("grant_id", ""))
+        except (TypeError, ValueError):
+            messages.error(request, "A valid grant is required.")
+            return redirect("instance-detail", pk=instance.pk)
+        deleted, _details = QueryRunnerGrant.objects.filter(pk=grant_id, instance=instance).delete()
+        if deleted:
+            messages.success(request, "Query-runner access revoked.")
+        return redirect("instance-detail", pk=instance.pk)
+
+    username = request.POST.get("username", "").strip()
+    if not username:
+        messages.error(request, "Enter a username to grant query-runner access.")
+        return redirect("instance-detail", pk=instance.pk)
+    User = get_user_model()
+    try:
+        target = User.objects.get(username=username)
+    except User.DoesNotExist:
+        messages.error(request, f"No user named '{username}'.")
+        return redirect("instance-detail", pk=instance.pk)
+    if target.is_superuser:
+        messages.error(request, "Administrators already have query-runner access.")
+        return redirect("instance-detail", pk=instance.pk)
+    QueryRunnerGrant.objects.get_or_create(user=target, instance=instance, defaults={"granted_by": request.user})
+    messages.success(request, f"Granted '{target.username}' query-runner access on {instance.name}.")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def preview_query(request, pk):
+    """Run a candidate INSERT/UPDATE inside a transaction that's immediately
+    rolled back, so the user can see its row impact before anything commits.
+    MFA is required for this route."""
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
+    if not can_run_queries(request.user, instance):
+        raise PermissionDenied("You do not have query-runner access on this instance.")
+    sql = request.POST.get("sql", "")
+    if not _require_action_mfa(request, instance, "run_query", detail=f"[preview] {sql[:200]}", require_code=True):
+        return redirect("instance-detail", pk=instance.pk)
+    try:
+        statement, rowcount = db.preview_write_query(instance, sql)
+        execution = QueryRunnerExecution.objects.create(
+            instance=instance, user=request.user, sql=statement, status="pending", rows_affected=rowcount,
+        )
+        _log_audit(
+            instance, "run_query", request.user, query=statement, result="success",
+            detail=f"[preview] rows_affected={rowcount} execution_id={execution.pk}",
+        )
+        messages.success(
+            request,
+            f"Preview: {rowcount} row(s) would be affected. Nothing was changed — "
+            f"review below, then Commit to apply or Discard to cancel.",
+        )
+    except db.QueryValidationError as exc:
+        messages.error(request, str(exc))
+    except db.ConnectionError as exc:
+        _log_audit(instance, "run_query", request.user, query=sql[:2000], result="failed", detail=f"[preview] {exc}")
+        messages.error(request, f"Preview failed: {exc}")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+def _get_own_pending_execution(request, instance, execution_id):
+    execution = get_object_or_404(QueryRunnerExecution, pk=execution_id, instance=instance, status="pending")
+    if execution.user_id != request.user.pk and not request.user.is_superuser:
+        raise PermissionDenied("You can only act on your own pending query preview.")
+    return execution
+
+
+@login_required
+@require_POST
+def commit_query(request, pk, execution_id):
+    """Re-run and commit a previously previewed statement. MFA is required."""
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
+    if not can_run_queries(request.user, instance):
+        raise PermissionDenied("You do not have query-runner access on this instance.")
+    execution = _get_own_pending_execution(request, instance, execution_id)
+    if not _require_action_mfa(request, instance, "run_query", detail=f"[commit] execution_id={execution.pk}", require_code=True):
+        return redirect("instance-detail", pk=instance.pk)
+    try:
+        rowcount = db.commit_write_query(instance, execution.sql)
+        execution.status = "committed"
+        execution.rows_affected = rowcount
+        execution.resolved_at = timezone.now()
+        execution.save(update_fields=["status", "rows_affected", "resolved_at"])
+        _log_audit(
+            instance, "run_query", request.user, query=execution.sql, result="success",
+            detail=f"[commit] rows_affected={rowcount} execution_id={execution.pk}",
+        )
+        messages.success(request, f"Committed. {rowcount} row(s) affected.")
+        cache.delete(f"activity:{instance.pk}")
+    except db.ConnectionError as exc:
+        execution.status = "failed"
+        execution.error = str(exc)
+        execution.resolved_at = timezone.now()
+        execution.save(update_fields=["status", "error", "resolved_at"])
+        _log_audit(instance, "run_query", request.user, query=execution.sql, result="failed", detail=f"[commit] {exc}")
+        messages.error(request, f"Commit failed: {exc}")
+    return redirect("instance-detail", pk=instance.pk)
+
+
+@login_required
+@require_POST
+def discard_query(request, pk, execution_id):
+    """Cancel a pending preview. No database connection is made — the preview
+    already rolled back, this just closes the bookkeeping record."""
+    instance = get_object_or_404(RDSInstance, pk=pk)
+    _require_instance_access(request, instance)
+    if not can_run_queries(request.user, instance):
+        raise PermissionDenied("You do not have query-runner access on this instance.")
+    execution = _get_own_pending_execution(request, instance, execution_id)
+    execution.status = "discarded"
+    execution.resolved_at = timezone.now()
+    execution.save(update_fields=["status", "resolved_at"])
+    _log_audit(instance, "run_query", request.user, query=execution.sql, result="success", detail=f"[discard] execution_id={execution.pk}")
+    messages.success(request, "Preview discarded. No changes were made.")
     return redirect("instance-detail", pk=instance.pk)
 
 

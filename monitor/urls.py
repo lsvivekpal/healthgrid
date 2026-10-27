@@ -37,6 +37,12 @@ urlpatterns = [
     path("instances/<int:pk>/rename/", views.rename_instance, name="instance-rename"),
     path("instances/<int:pk>/owner-webhook/", views.update_owner_webhook, name="instance-owner-webhook"),
     path("instances/<int:pk>/control-credentials/", views.update_control_credentials, name="instance-control-credentials"),
+    path("instances/<int:pk>/query-runner/credentials/", views.update_query_runner_credentials, name="instance-query-runner-credentials"),
+    path("instances/<int:pk>/query-runner/test-connection/", views.test_query_runner_connection, name="instance-test-query-runner-connection"),
+    path("instances/<int:pk>/query-runner/grant/", views.query_runner_grant, name="instance-query-runner-grant"),
+    path("instances/<int:pk>/query-runner/preview/", views.preview_query, name="instance-query-runner-preview"),
+    path("instances/<int:pk>/query-runner/commit/<int:execution_id>/", views.commit_query, name="instance-query-runner-commit"),
+    path("instances/<int:pk>/query-runner/discard/<int:execution_id>/", views.discard_query, name="instance-query-runner-discard"),
     path("instances/<int:pk>/remove/", views.remove_instance, name="instance-remove"),
     path("instances/group/<uuid:group_id>/remove/", views.remove_instance_group, name="instance-group-remove"),
 ]
